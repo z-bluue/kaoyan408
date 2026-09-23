@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="408 刷题">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b8ef7"/>
+      <stop offset="1" stop-color="#1a5fd0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="0" fill="url(#bg)"/>
+  <g fill="#ffffff" opacity="0.16">
+    <rect x="56" y="96" width="400" height="14" rx="7"/>
+    <rect x="56" y="146" width="300" height="14" rx="7"/>
+    <rect x="56" y="196" width="344" height="14" rx="7"/>
+  </g>
+  <text x="256" y="360" text-anchor="middle"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif"
+        font-size="200" font-weight="700" fill="#ffffff" letter-spacing="-6">408</text>
+  <circle cx="418" cy="404" r="46" fill="#3fb950"/>
+  <path d="M398 404 l14 15 27 -30" stroke="#ffffff" stroke-width="11" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

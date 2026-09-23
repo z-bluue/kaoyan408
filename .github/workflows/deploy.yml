@@ -1,0 +1,60 @@
+name: 部署到 GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验题库
+        run: python3 tools/bank_tool.py validate
+
+      - name: 生成题库清单
+        run: python3 tools/bank_tool.py build
+
+      - name: 回写题库清单
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet data/; then
+            git add data/
+            git commit -m "chore: 自动更新题库清单 [skip ci]"
+            git push
+          else
+            echo "题库清单无变化"
+          fi
+
+      - name: 整理站点文件
+        run: |
+          mkdir -p _site
+          cp -r index.html manifest.webmanifest sw.js css js data icons _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

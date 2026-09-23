@@ -1,0 +1,36 @@
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 编辑器 ----------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# ---------- 构建产物 / 临时文件 ----------
+_site/
+node_modules/
+*.log
+*.tmp
+*.bak
+
+# ---------- 本地私有内容 ----------
+# 你自己整理的真题、花钱买的题库，放这里可以避免误推到公开仓库。
+# 从 private/ 导入题库时用：
+#   python tools/bank_tool.py import --subject ds --input private/我的题.csv --append
+private/
+
+# ---------- 凭据（备份文件里可能带 Token / API Key，别推上去）----------
+kaoyan408-*.json
+*progress*.json
+!.github/

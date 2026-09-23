@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="408刷题">
+<title>408 刷题</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="tb-left">
+      <div class="tb-title" id="viewTitle">刷题</div>
+      <div class="tb-sub" id="viewSub"></div>
+    </div>
+    <div class="tb-right">
+      <button class="icon-btn" id="btnScope" type="button">范围</button>
+    </div>
+  </header>
+
+  <main id="views">
+
+    <!-- ============ 刷题 ============ -->
+    <section class="view" id="view-practice">
+
+      <div id="startScreen">
+        <div class="hero">
+          <div class="hero-main">
+            <div class="hero-num" id="dueCount">–</div>
+            <div class="hero-label">待复习</div>
+          </div>
+          <div class="hero-side">
+            <div class="hero-cell"><b id="statNew">–</b><span>未做</span></div>
+            <div class="hero-cell"><b id="statTotal">–</b><span>题库</span></div>
+            <div class="hero-cell"><b id="statStreak">–</b><span>连续天</span></div>
+          </div>
+        </div>
+
+        <div class="btn-col">
+          <button class="btn primary lg" data-mode="due" type="button">
+            开始复习 <span class="badge" id="badgeDue"></span>
+          </button>
+          <div class="btn-row">
+            <button class="btn" data-mode="new" type="button">刷新题<span class="badge" id="badgeNew"></span></button>
+            <button class="btn" data-mode="wrong" type="button">错题重做<span class="badge" id="badgeWrong"></span></button>
+          </div>
+          <div class="btn-row">
+            <button class="btn" data-mode="weak" type="button">薄弱点推题</button>
+            <button class="btn" data-mode="random" type="button">随机练习</button>
+          </div>
+        </div>
+
+        <div class="scope-line" id="scopeLine"></div>
+        <div class="tip-line" id="syncTip"></div>
+      </div>
+
+      <div id="quizScreen" hidden>
+        <div class="quiz-head">
+          <div class="progress"><i id="pBar"></i></div>
+          <div class="quiz-counts">
+            <span id="qCounter">0/0</span>
+            <span class="dot-ok" id="qOk">✓ 0</span>
+            <span class="dot-no" id="qNo">✗ 0</span>
+            <button class="link-btn" id="btnQuit" type="button">结束</button>
+          </div>
+        </div>
+
+        <div class="qtag" id="qTag"></div>
+        <article class="card q-stem" id="qStem"></article>
+
+        <div class="options" id="qOptions"></div>
+
+        <div class="fill-wrap" id="fillWrap" hidden>
+          <input class="fill-input" id="fillInput" type="text" autocomplete="off"
+                 autocapitalize="off" spellcheck="false" placeholder="输入答案后点提交">
+          <button class="btn primary" id="btnFillSubmit" type="button">提交</button>
+        </div>
+
+        <div class="card feedback" id="qFeedback" hidden></div>
+
+        <div class="srs-row" id="srsRow" hidden>
+          <button class="srs srs-0" data-grade="0" type="button">重来<em id="srsIvl0"></em></button>
+          <button class="srs srs-1" data-grade="1" type="button">困难<em id="srsIvl1"></em></button>
+          <button class="srs srs-2" data-grade="2" type="button">一般<em id="srsIvl2"></em></button>
+          <button class="srs srs-3" data-grade="3" type="button">简单<em id="srsIvl3"></em></button>
+        </div>
+
+        <div class="quiz-foot" id="quizFoot"></div>
+        <div id="quizSummary" hidden></div>
+      </div>
+    </section>
+
+    <!-- ============ 错题本 ============ -->
+    <section class="view" id="view-wrong" hidden>
+      <div class="card wrong-head">
+        <div class="row-between">
+          <div>
+            <div class="big-num" id="wrongCount">0</div>
+            <div class="muted">道错题待攻克</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="wrongOnlyUnmastered" checked>
+            <span>只看未掌握</span>
+          </label>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" id="btnPushFromWrong" type="button">根据错题推新题</button>
+          <button class="btn" id="btnRedoWrong" type="button">批量重做</button>
+        </div>
+      </div>
+
+      <div class="chips" id="wrongChips"></div>
+      <div class="list" id="wrongList"></div>
+      <div class="empty" id="wrongEmpty" hidden></div>
+    </section>
+
+    <!-- ============ 统计 ============ -->
+    <section class="view" id="view-stats" hidden>
+      <div class="grid2">
+        <div class="card mini"><div class="big-num" id="stToday">0</div><div class="muted">今日刷题</div></div>
+        <div class="card mini"><div class="big-num" id="stAcc">–</div><div class="muted">总正确率</div></div>
+        <div class="card mini"><div class="big-num" id="stDone">0</div><div class="muted">已覆盖题目</div></div>
+        <div class="card mini"><div class="big-num" id="stStreak">0</div><div class="muted">连续打卡</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">近 30 天刷题量</div>
+        <canvas id="chartDaily" height="180"></canvas>
+      </div>
+
+      <div class="card">
+        <div class="card-title">近 30 天正确率</div>
+        <canvas id="chartAcc" height="180"></canvas>
+      </div>
+
+      <div class="card">
+        <div class="card-title">各科目掌握情况</div>
+        <div id="subjectBars"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">薄弱知识点 <span class="muted small">点击可针对性刷题</span></div>
+        <div class="weak-list" id="weakList"></div>
+      </div>
+    </section>
+
+    <!-- ============ 我的 ============ -->
+    <section class="view" id="view-me" hidden>
+      <div class="card">
+        <div class="card-title">题库</div>
+        <div class="kv" id="bankInfo"></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" id="btnUpdateBank" type="button">检查更新</button>
+          <button class="btn" id="btnReloadBank" type="button">重载本地题库</button>
+        </div>
+        <div class="muted small" id="bankMsg" style="margin-top:8px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">每日目标</div>
+        <div class="field">
+          <label>每天做多少题</label>
+          <input class="input" id="inGoal" type="number" min="5" max="500" step="5" inputmode="numeric">
+        </div>
+        <label class="switch" style="margin-top:10px">
+          <input type="checkbox" id="inAutoUpdate">
+          <span>启动时自动检查题库更新</span>
+        </label>
+      </div>
+
+      <div class="card">
+        <div class="card-title">多设备同步 <span class="muted small">GitHub Gist</span></div>
+        <div class="field">
+          <label>GitHub Token（需要 gist 权限）</label>
+          <input class="input" id="inToken" type="password" autocomplete="off" placeholder="ghp_... 或 github_pat_...">
+        </div>
+        <div class="field">
+          <label>Gist ID（留空自动创建）</label>
+          <input class="input" id="inGist" type="text" autocomplete="off" placeholder="例如 8f3c1b...">
+        </div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn primary" id="btnSyncNow" type="button">立即同步</button>
+          <button class="btn" id="btnPush" type="button">仅上传</button>
+          <button class="btn" id="btnPull" type="button">仅下载</button>
+        </div>
+        <div class="muted small" id="syncMsg" style="margin-top:8px">
+          Token 只保存在本机浏览器里，不会上传到任何第三方。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">AI 自动出题 <span class="muted small">DeepSeek</span></div>
+        <div class="muted small" style="margin-bottom:12px">
+          AI 在后台盯着你的错题本：找出你反复错的<b>知识点</b>，把相关错题
+          （连同你当时选错的那个选项）一起发给 DeepSeek，
+          生成一道考查同样知识点的新题，自动加进题库参与复习。
+        </div>
+
+        <label class="switch" style="margin-bottom:12px">
+          <input type="checkbox" id="inAiAuto">
+          <span>开启自动出题（后台运行，会产生 API 费用）</span>
+        </label>
+
+        <div class="field">
+          <label>DeepSeek API Key</label>
+          <input class="input" id="inAiKey" type="password" autocomplete="off" placeholder="sk-...">
+        </div>
+        <div class="field">
+          <label>模型</label>
+          <select class="input" id="inAiModel">
+            <option value="deepseek-flash">deepseek-flash（快、便宜，推荐）</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro（更强、更贵）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>每天最多生成几道</label>
+          <input class="input" id="inAiDailyLimit" type="number" min="0" max="50" step="1" inputmode="numeric">
+        </div>
+        <label class="switch" style="margin-bottom:12px">
+          <input type="checkbox" id="inAiFast" checked>
+          <span>关闭深度思考（更快，题目难度略降）</span>
+        </label>
+
+        <div class="btn-row">
+          <button class="btn primary" id="btnAiRun" type="button">立即生成一批</button>
+          <button class="btn" id="btnAiTest" type="button">测试连接</button>
+        </div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn" id="btnAiClear" type="button">清空 AI 题库</button>
+        </div>
+
+        <div class="kv" id="aiStatus" style="margin-top:14px"></div>
+        <div class="muted small" id="aiNote" style="margin-top:8px"></div>
+        <div class="muted small" id="aiMsg" style="margin-top:10px">
+          Key 只存在本机浏览器里，不会上传到任何第三方。
+          生成一道题大约几分钱，具体价格见 DeepSeek 官网。
+          AI 出的题可能有错，答案请自己再核一遍。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">题库更新源</div>
+        <div class="field">
+          <label>GitHub 仓库（owner/repo）</label>
+          <input class="input" id="inRepo" type="text" autocomplete="off" placeholder="yourname/kaoyan408">
+        </div>
+        <div class="field">
+          <label>分支</label>
+          <input class="input" id="inBranch" type="text" autocomplete="off" placeholder="main">
+        </div>
+        <div class="field">
+          <label>加速通道</label>
+          <select class="input" id="inMirror">
+            <option value="jsdelivr">jsDelivr CDN（国内较快）</option>
+            <option value="raw">GitHub Raw 直连</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">数据</div>
+        <div class="btn-row">
+          <button class="btn" id="btnExport" type="button">导出进度</button>
+          <button class="btn" id="btnImport" type="button">导入进度</button>
+          <button class="btn danger" id="btnReset" type="button">清空进度</button>
+        </div>
+        <input type="file" id="fileImport" accept="application/json,.json" hidden>
+      </div>
+
+      <div class="card">
+        <div class="card-title">关于</div>
+        <div class="muted small">
+          408 刷题 PWA · 离线可用 · 支持间隔重复与错题推题。<br>
+          题目为原创练习，仅用于个人复习。
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-view="practice" type="button"><i>刷</i><span>刷题</span></button>
+    <button class="tab" data-view="wrong" type="button"><i>错</i><span>错题</span></button>
+    <button class="tab" data-view="stats" type="button"><i>计</i><span>统计</span></button>
+    <button class="tab" data-view="me" type="button"><i>我</i><span>我的</span></button>
+  </nav>
+</div>
+
+<!-- 范围选择弹层 -->
+<div class="sheet" id="scopeSheet" hidden>
+  <div class="sheet-mask" data-close></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <b>选择题库范围</b>
+      <button class="icon-btn" data-close type="button">关闭</button>
+    </div>
+    <div class="sheet-scroll">
+      <div class="sec-title">科目</div>
+      <div class="chips" id="scopeSubjects"></div>
+      <div class="sec-title">章节 <span class="muted small">不选=全部</span></div>
+      <div id="scopeChapters"></div>
+      <div class="sec-title">难度</div>
+      <div class="chips" id="scopeDiff"></div>
+      <div class="sec-title">本轮题量</div>
+      <div class="chips" id="scopeLimit"></div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn" id="btnScopeReset" type="button">重置</button>
+      <button class="btn primary" id="btnScopeApply" type="button">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

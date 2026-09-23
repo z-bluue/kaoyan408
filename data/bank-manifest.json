@@ -1,0 +1,39 @@
+{
+  "version": "20260924.12",
+  "generated": "2026-09-24 00:10:35",
+  "count": 164,
+  "subjects": {
+    "ds": {
+      "file": "ds.json",
+      "name": "数据结构",
+      "count": 44,
+      "version": "20260924.9",
+      "sha256": "97dd418f6ed5c07db2dd27d1e522d51dabc3c8ae468ca2ab5440beca58f7fe5f",
+      "bytes": 49208
+    },
+    "co": {
+      "file": "co.json",
+      "name": "计算机组成原理",
+      "count": 40,
+      "version": "20260924.10",
+      "sha256": "cfae4b9258bf2e192e80969f4458420a6db4c74bd29bb26c6c9bd04378aaac70",
+      "bytes": 48951
+    },
+    "os": {
+      "file": "os.json",
+      "name": "操作系统",
+      "count": 40,
+      "version": "20260924.11",
+      "sha256": "46afa0e5295c9f33e33515e9f1189e66ab9a3ff61449c93bef45e90247be1103",
+      "bytes": 58106
+    },
+    "net": {
+      "file": "net.json",
+      "name": "计算机网络",
+      "count": 40,
+      "version": "20260924.12",
+      "sha256": "b67f74e29aacd778046f4f4fcea14cb025f6bdf10eee276419d01f924326145b",
+      "bytes": 57884
+    }
+  }
+}

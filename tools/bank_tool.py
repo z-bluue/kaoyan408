@@ -336,15 +336,28 @@ def cmd_build(args):
     else:
         manifest_version = "%s.1" % base
 
-    manifest = {
+    manifest_core = {
         "version": manifest_version,
-        "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "count": total,
         "subjects": out_subjects,
     }
-    dump_json(MANIFEST_FILE, manifest)
+    old_core = {k: v for k, v in old.items() if k != "generated"} if old else None
 
-    print("已生成 data/bank-manifest.json")
+    if os.path.exists(MANIFEST_FILE) and old_core == manifest_core:
+        # 版本号、题数、各科摘要都一致，就不重写文件。
+        # 否则 generated 时间戳每次都会变，CI 每跑一次就多出一个无意义的提交。
+        unchanged = True
+    else:
+        manifest = {
+            "version": manifest_version,
+            "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "count": total,
+            "subjects": out_subjects,
+        }
+        dump_json(MANIFEST_FILE, manifest)
+        unchanged = False
+
+    print("题库清单无变化，未写入文件" if unchanged else "已生成 data/bank-manifest.json")
     print("  题库版本：%s" % manifest_version)
     for sid, info in out_subjects.items():
         mark = "★ 有更新" if sid in changed_ids else ""

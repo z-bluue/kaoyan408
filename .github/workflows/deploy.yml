@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
   pages: write
-  pages: read
   id-token: write
 
 concurrency:
@@ -43,18 +42,6 @@ jobs:
         run: |
           mkdir -p _site
           cp -r index.html manifest.webmanifest sw.js css js data icons _site/
-
-      - name: 检查 Pages 是否已启用
-        run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/pages)
-          if [ "$code" != "200" ]; then
-            echo "::error title=GitHub Pages 尚未启用::请到仓库的 Settings → Pages，把 Build and deployment 下的 Source 改成「GitHub Actions」，然后重新运行本工作流。"
-            exit 1
-          fi
-          echo "Pages 已启用，继续部署"
 
       - uses: actions/configure-pages@v5
 

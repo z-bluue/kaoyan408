@@ -78,7 +78,6 @@ async function boot() {
   renderMe();
   showView('practice');
 
-  registerSW();
   kickOffBackgroundTasks();
   // 先让首页渲染完，再在后台自动补题
   scheduleAutoAi(6000, 3);
@@ -121,9 +120,15 @@ async function refreshProgress() {
 
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  });
+  const doRegister = () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      // 不要静默吞掉：注册失败会直接导致「离线可用」和「添加到主屏幕」失效
+      console.warn('[408] Service Worker 注册失败，离线缓存将不可用：', err);
+    });
+  };
+  // 要兼容两种时序：load 还没触发，又或者已经触发过了
+  if (document.readyState === 'complete') doRegister();
+  else window.addEventListener('load', doRegister, { once: true });
 }
 
 function kickOffBackgroundTasks() {
@@ -1248,4 +1253,8 @@ function revealSrs() {
 }
 
 /* 启动 */
+// Service Worker 必须尽早注册：boot() 里有一堆 await（IndexedDB、题库加载），
+// 如果放到 boot() 末尾再挂 load 监听器，那时 load 事件早已触发，注册永远不会执行，
+// 这正是之前线上"离线可用"失效的原因。
+registerSW();
 boot();

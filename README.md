@@ -60,6 +60,14 @@ git push -u origin main
 
    几十秒后访问 `https://<你的用户名>.github.io/<仓库名>/` 就能用了。
 
+> ⚠️ **如果部署卡在 `waiting` 不动**：
+> 这是 `github-pages` 环境的 **Deployment branches and tags** 被设成了「只允许选定分支」、
+> 而白名单是空的，`main` 不在里面。
+>
+> 到 `Settings → Environments → github-pages → Deployment branches and tags`，
+> 选 **All branches**，或者点 **Add deployment branch or tag rule** 手动加一条允许 `main` 的规则。
+> 改完部署会立刻放行，不用改代码。
+
 > 这个网址就是你的 App 地址，记下来，手机浏览器直接打开。
 
 ---
@@ -359,6 +367,7 @@ flowchart TD
 ├── tools/
 │   ├── bank_tool.py            题库校验 / 清单 / 统计 / 导入
 │   ├── make_icons.py           生成应用图标
+│   ├── check_workflow.py       校验 GitHub Actions 工作流文件
 │   └── 题目导入模板.csv
 └── .github/workflows/deploy.yml  自动校验 + 部署到 Pages
 ```
@@ -387,6 +396,11 @@ C:/Python314/python.exe tools/bank_tool.py import --subject ds --input 我的题
 
 # 重新生成图标
 C:/Python314/python.exe tools/make_icons.py
+
+# 改了 .github/workflows/ 下的文件后必跑：校验工作流
+# （YAML 重复 key 之类的问题会让 GitHub 拒绝解析整个工作流，
+#   表现是"一个 job 都不启动"，不在本地查很难发现）
+C:/Python314/python.exe tools/check_workflow.py
 ```
 
 ### 改了代码后手机怎么拿到新版

@@ -824,7 +824,15 @@ async function renderAiPanel(state, reason, isError) {
 
   let note = '';
   let cls = 'muted small';
-  if (st.disabled) {
+  const syncReady = !!(S.settings.token && S.settings.gistId);
+
+  if (total > 0 && !syncReady) {
+    // 这是最容易踩的坑：题生成了，但同步没配好，新题永远出不去，
+    // 而界面上看不出任何异常。所以这里要主动、显眼地告诉用户。
+    note = `⚠️ 这 ${total} 道 AI 题目前只存在本机。到下面「多设备同步」填好 Token 并点一次`
+      + `「立即同步」，之后新生成的题就会自动上传到 GitHub。`;
+    cls = 'small';
+  } else if (st.disabled) {
     note = '⚠️ 已自动暂停：' + (st.lastError || '未知错误') + '（重新打开开关即可恢复）';
     cls = 'small';
   } else if (isError && reason) {
@@ -835,7 +843,10 @@ async function renderAiPanel(state, reason, isError) {
     note = '自动出题未开启。开启后会在你答错题时自动补题。';
   } else {
     const gate = autoAi.canRun(st, S.settings);
-    note = gate.ok ? '空闲中，会在你答错题后自动补题' : gate.why;
+    const synced = syncReady
+      ? (S.settings.lastSync ? `；已开启自动同步（上次 ${fmtRelative(S.settings.lastSync)}）` : '；已开启自动同步')
+      : '';
+    note = gate.ok ? ('空闲中，会在你答错题后自动补题' + synced) : gate.why;
   }
   noteEl.className = cls;
   noteEl.textContent = note;

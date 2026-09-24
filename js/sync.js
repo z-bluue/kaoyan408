@@ -84,7 +84,7 @@ export async function push({ token, gistId }) {
     token,
     body: { files: { [FILE_NAME]: { content: JSON.stringify(payload) } } },
   });
-  return { progress: payload.progress.length, logs: payload.logs.length };
+  return { progress: payload.progress.length, logs: payload.logs.length, ai: payload.ai.length };
 }
 
 /**

@@ -106,6 +106,18 @@ async function loadAiQuestions() {
   }
 }
 
+/**
+ * 重新从本地库加载 AI 题。
+ * 同步（拉取）之后必须调一次：否则从别的设备拉下来的 AI 题要重启 App 才能看到。
+ */
+async function reloadAiQuestions() {
+  S.questions = S.questions.filter(q => !q.ai);
+  for (const [id, q] of [...S.byId]) if (q.ai) S.byId.delete(id);
+  await loadAiQuestions();
+  // 会话队列里已经不存在的题要剔掉，否则会卡住
+  if (S.session) S.session.queue = S.session.queue.filter(id => S.byId.has(id));
+}
+
 /** 把一次 loadBank 的结果应用到全局状态 */
 function applyBankResult(r) {
   S.questions = r.questions;
@@ -740,6 +752,7 @@ async function generateSimilarForCurrent(btn) {
     btn.textContent = '✓ 已生成，下一题就是它';
     btn.classList.add('primary');
     renderMe();
+    autoSyncSoon();        // 尽快把新题传上去，别只留在本机
     toast('AI 题目已生成', 2400);
   } catch (e) {
     btn.disabled = false;
@@ -780,6 +793,7 @@ async function runAutoAi(max = 3, { force = false } = {}) {
       S.aiCount = S.questions.filter(x => x.ai).length;
       renderStart();
       renderWrong();
+      autoSyncSoon();
       toast(`AI 出了一道「${target.topic}」的新题`, 2600);
     },
     onStatus: ({ state, ran, reason, error }) => renderAiPanel(state, reason, error),
@@ -858,10 +872,23 @@ async function autoSync() {
     const res = await sync.sync({ token: S.settings.token, gistId: S.settings.gistId });
     await saveSettings({ gistId: res.gistId, lastSync: Date.now() });
     await refreshProgress();
-    renderStart(); renderWrong(); renderStats();
+    await reloadAiQuestions();   // AI 题也在同步范围内，拉到的要立刻可用
+    renderStart(); renderWrong(); renderStats(); renderMe();
   } catch (e) {
     console.warn('自动同步失败', e);
   }
+}
+
+/**
+ * AI 出题之后延迟自动上传。
+ * 没有这个的话，手机上刚生成的题会一直只留在本机，
+ * 要等下次启动 App 或手动点同步才会传上去。
+ */
+let syncTimer = null;
+function autoSyncSoon(delay = 25000) {
+  if (!S.settings.token || !S.settings.gistId) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { autoSync(); }, delay);
 }
 
 /* ===========================================================
@@ -1172,10 +1199,13 @@ function bindGlobalEvents() {
       if (res.gistId) await saveSettings({ gistId: res.gistId, lastSync: Date.now() });
       $('#inGist').value = S.settings.gistId || '';
       await refreshProgress();
-      renderStart(); renderWrong(); renderStats();
-      const p = res.pulled || { progress: 0, logs: 0 };
-      const u = res.pushed || { progress: 0, logs: 0 };
-      $('#syncMsg').textContent = `同步完成 · 下载 ${p.progress || 0} 条进度 / ${p.logs || 0} 条记录，上传 ${u.progress || 0} 条进度 / ${u.logs || 0} 条记录`;
+      await reloadAiQuestions();   // 拉到的 AI 题立刻可用，不用重启 App
+      renderStart(); renderWrong(); renderStats(); renderMe();
+      const p = res.pulled || { progress: 0, logs: 0, ai: 0 };
+      const u = res.pushed || { progress: 0, logs: 0, ai: 0 };
+      $('#syncMsg').textContent =
+        `同步完成 · 下载 ${p.progress || 0} 条进度 / ${p.logs || 0} 条记录 / ${p.ai || 0} 道 AI 题，`
+        + `上传 ${u.progress || 0} 条进度 / ${u.logs || 0} 条记录 / ${u.ai || 0} 道 AI 题`;
       toast('同步完成');
     } catch (e) {
       $('#syncMsg').textContent = '同步失败：' + e.message;

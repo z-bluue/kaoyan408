@@ -5,13 +5,24 @@
 
 export const GRADE = { AGAIN: 0, HARD: 1, GOOD: 2, EASY: 3 };
 
-const MIN = 60 * 1000;
-const DAY = 24 * 60 * MIN;
+/* ---------------- 复习节奏 ---------------- */
+export const PACING = {
+  /** 按遗忘曲线：答错的题当天不再安排，隔天再见，之后 1→3→7→17… 逐级拉长 */
+  CURVE: 'curve',
+  /** 当天巩固：分钟级阶梯，当天反复练几遍再进入天级（Anki 风格） */
+  CRAM: 'cram',
+};
 
-/** 学习阶梯（分钟） */
+const MIN = 60 * 1000;
+export const DAY_MS = 24 * 60 * MIN;
+const DAY = DAY_MS;
+
+/** cram 模式的学习阶梯（分钟） */
 const LADDER_LEARN = [1, 10];
-/** 重学阶梯（分钟） */
+/** cram 模式的重学阶梯（分钟） */
 const LADDER_RELEARN = [10];
+/** curve 模式的间隔阶梯（天）：答对逐级前进，答错回到第一级 */
+const CURVE_STEPS = [1, 3, 7];
 /** 毕业间隔（天） */
 const GRADUATING_IVL = 1;
 /** 直接点"简单"的毕业间隔（天） */
@@ -45,8 +56,15 @@ function ladderOf(state) {
   return state === STATE.RELEARN ? LADDER_RELEARN : LADDER_LEARN;
 }
 
-/** 根据 4 档评分计算下一次安排；返回新的 progress 记录 */
-export function schedule(prev, grade, now = Date.now()) {
+/**
+ * 根据 4 档评分计算下一次安排。
+ * @param {object|null} prev 之前的 progress 记录
+ * @param {number} grade 0=重来 1=困难 2=一般 3=简单
+ * @param {number} now 时间戳
+ * @param {{pacing?: string}} opts 复习节奏，默认按遗忘曲线
+ */
+export function schedule(prev, grade, now = Date.now(), opts = {}) {
+  const pacing = opts.pacing === PACING.CRAM ? PACING.CRAM : PACING.CURVE;
   const r = prev ? { ...prev } : newRecord(null);
   r.reps = (r.reps || 0) + 1;
   r.updated = now;
@@ -54,6 +72,7 @@ export function schedule(prev, grade, now = Date.now()) {
   if (!r.firstSeen) r.firstSeen = now;
   r.lastGrade = grade;
 
+  /* ---------------- 答错 ---------------- */
   if (grade === GRADE.AGAIN) {
     r.lapses = (r.lapses || 0) + 1;
     r.wrongCount = (r.wrongCount || 0) + 1;
@@ -61,27 +80,68 @@ export function schedule(prev, grade, now = Date.now()) {
     r.state = (r.state === STATE.REVIEW) ? STATE.RELEARN : STATE.LEARNING;
     r.step = 0;
     r.ef = Math.max(1.3, round2((r.ef || 2.5) - 0.2));
-    const m = ladderOf(r.state)[0];
-    r.interval = 0;
-    r.due = now + m * MIN;
+
+    if (pacing === PACING.CURVE) {
+      // 遗忘曲线模式：当天不再安排，退回阶梯第一级（次日再见）
+      r.interval = CURVE_STEPS[0];
+      r.due = now + CURVE_STEPS[0] * DAY;
+    } else {
+      const m = ladderOf(r.state)[0];
+      r.interval = 0;
+      r.due = now + m * MIN;
+    }
     return r;
   }
 
+  /* ---------------- 答对 ---------------- */
   r.rightCount = (r.rightCount || 0) + 1;
   r.lastCorrect = true;
 
-  if (r.state === STATE.NEW || r.state === STATE.LEARNING || r.state === STATE.RELEARN) {
-    if (grade === GRADE.EASY) {
-      return graduate(r, EASY_IVL, now);
+  const isLearning = r.state === STATE.NEW || r.state === STATE.LEARNING || r.state === STATE.RELEARN;
+
+  if (isLearning) {
+    if (grade === GRADE.EASY) return graduate(r, EASY_IVL, now);
+
+    if (pacing === PACING.CURVE) {
+      // 新题第一次答对 → 落到阶梯第一级
+      if (r.state === STATE.NEW) {
+        r.state = STATE.LEARNING;
+        r.step = 0;
+        r.interval = CURVE_STEPS[0];
+        r.due = now + r.interval * DAY;
+        return r;
+      }
+      const idx = Math.min(r.step || 0, CURVE_STEPS.length - 1);
+      if (grade === GRADE.HARD) {
+        // 困难：原地踏步，不前进到下一级，下一轮还是同一间隔
+        r.interval = CURVE_STEPS[idx];
+        r.due = now + r.interval * DAY;
+        return r;
+      }
+      if (idx >= CURVE_STEPS.length - 1) {
+        // 阶梯走完 → 毕业，之后按 EF 逐级拉长
+        r.state = STATE.REVIEW;
+        r.step = 0;
+        r.interval = clamp(round1(CURVE_STEPS[idx] * r.ef), 1, MAX_IVL);
+        r.due = now + r.interval * DAY;
+        return r;
+      }
+      r.step = idx + 1;
+      r.state = STATE.LEARNING;
+      r.interval = CURVE_STEPS[r.step];
+      r.due = now + r.interval * DAY;
+      return r;
     }
+
+    // ---- cram 模式：分钟级阶梯 ----
+    const ladder = ladderOf(r.state);
     if (grade === GRADE.HARD) {
       // 原地踏步：给一个较短的重现时间
-      const m = ladderOf(r.state)[Math.min(r.step || 0, ladderOf(r.state).length - 1)];
+      const m = ladder[Math.min(r.step || 0, ladder.length - 1)];
       r.due = now + Math.max(1, m) * MIN;
       r.interval = 0;
       return r;
     }
-    const ladder = ladderOf(r.state);
     const nextStep = (r.step || 0) + 1;
     if (nextStep >= ladder.length) {
       return graduate(r, GRADUATING_IVL, now);
@@ -92,7 +152,7 @@ export function schedule(prev, grade, now = Date.now()) {
     return r;
   }
 
-  // ---- 复习阶段 ----
+  // ---- 复习阶段：两种节奏一致 ----
   const ivl = r.interval || 1;
   let next;
   if (grade === GRADE.HARD) {
@@ -104,7 +164,7 @@ export function schedule(prev, grade, now = Date.now()) {
     next = ivl * r.ef * 1.3;
     r.ef = Math.max(1.3, round2(r.ef + 0.05));
   }
-  next = clamp(Math.round(next * 10) / 10, 1, MAX_IVL);
+  next = clamp(round1(next), 1, MAX_IVL);
   r.state = STATE.REVIEW;
   r.interval = next;
   r.due = now + next * DAY;
@@ -120,8 +180,8 @@ function graduate(r, days, now) {
 }
 
 /** 预览四个按钮对应的下次间隔文本（不落库） */
-export function previewIntervals(prev, now = Date.now()) {
-  return [0, 1, 2, 3].map(g => humanInterval(schedule(prev, g, now).due - now));
+export function previewIntervals(prev, now = Date.now(), opts = {}) {
+  return [0, 1, 2, 3].map(g => humanInterval(schedule(prev, g, now, opts).due - now));
 }
 
 export function humanInterval(ms) {
@@ -156,7 +216,8 @@ export function isMastered(p) {
   return p.lastCorrect === true && (p.interval || 0) >= 21;
 }
 
+function round1(n) { return Math.round(n * 10) / 10; }
 function round2(n) { return Math.round(n * 100) / 100; }
 function clamp(n, a, b) { return Math.min(b, Math.max(a, n)); }
 
-export default { GRADE, STATE, newRecord, schedule, previewIntervals, humanInterval, autoGrade, isMastered };
+export default { GRADE, STATE, PACING, DAY_MS, newRecord, schedule, previewIntervals, humanInterval, autoGrade, isMastered };

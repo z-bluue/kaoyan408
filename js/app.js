@@ -18,6 +18,8 @@ import {
 const DEFAULT_SETTINGS = {
   goal: 40,
   autoUpdate: true,
+  // 复习节奏：默认按遗忘曲线（答错的题当天不再安排，隔天再见）
+  pacing: 'curve',
   repo: '',
   branch: 'main',
   mirror: 'jsdelivr',
@@ -462,7 +464,7 @@ function renderSrsRow() {
   const st = S.quiz;
   const q = st.q;
   const prev = S.progress.get(q.id) || srs.newRecord(q.id);
-  const ivls = srs.previewIntervals(prev, st.ts || Date.now());
+  const ivls = srs.previewIntervals(prev, st.ts || Date.now(), { pacing: S.settings.pacing });
   const auto = srs.autoGrade({ correct: st.correct, ms: st.ms, state: prev.state });
 
   $('#srsIvl0').textContent = ivls[0];
@@ -495,7 +497,7 @@ async function commitGrade(grade) {
 
   const q = st.q;
   const prev = S.progress.get(q.id) || srs.newRecord(q.id);
-  const cur = srs.schedule(prev, grade, st.ts || Date.now());
+  const cur = srs.schedule(prev, grade, st.ts || Date.now(), { pacing: S.settings.pacing });
   cur.id = q.id;
   // 记下当时选错的选项：之后 AI 出题时才知道你具体错在哪，能针对性设陷阱
   if (!st.correct && st.picked && st.picked.size) cur.lastWrongPick = [...st.picked];
@@ -515,7 +517,10 @@ async function commitGrade(grade) {
   if (!st.correct) scheduleAutoAi(12000, 1);
 
   // 短间隔的题在本轮内重排，形成"立即再练一遍"
-  if (cur.due - Date.now() <= REQUEUE_WINDOW) {
+  // 只有"当天巩固"模式才在本轮内重排；
+  // "按遗忘曲线"模式下答错的题最早次日才出现，本轮不再重考。
+  const cramMode = S.settings.pacing === srs.PACING.CRAM;
+  if (cramMode && cur.due - Date.now() <= REQUEUE_WINDOW) {
     const n = s.extra[q.id] || 0;
     if (n < REQUEUE_MAX) {
       s.extra[q.id] = n + 1;
@@ -712,6 +717,8 @@ function fillSettingsForm() {
   const s = S.settings;
   $('#inGoal').value = s.goal;
   $('#inAutoUpdate').checked = !!s.autoUpdate;
+  $('#inPacing').value = s.pacing || 'curve';
+  updatePacingHint();
   $('#inToken').value = s.token || '';
   $('#inGist').value = s.gistId || '';
   $('#inRepo').value = s.repo || '';
@@ -850,6 +857,39 @@ async function renderAiPanel(state, reason, isError) {
   }
   noteEl.className = cls;
   noteEl.textContent = note;
+}
+
+/* ===========================================================
+   复习节奏
+   =========================================================== */
+function updatePacingHint() {
+  const el = $('#pacingHint');
+  if (!el) return;
+  const curve = (S.settings.pacing || 'curve') !== srs.PACING.CRAM;
+  el.textContent = curve
+    ? '答错的题当天不再出现。复习间隔走 1 天 → 3 天 → 7 天 → 17 天 → 43 天…，中间再答错就退回 1 天重新爬。'
+    : '答错的题本轮会再练一遍（1 分钟 → 10 分钟 → 次日），之后再按天数逐级拉长。适合时间紧、想当天就把题吃透。';
+}
+
+/** 切到"遗忘曲线"时，把还卡在分钟级阶梯里的题顺延到次日 */
+async function migrateLearningToCurve() {
+  const all = await store.getAll('progress');
+  const now = Date.now();
+  const rows = [];
+  for (const p of all) {
+    if (p.state !== srs.STATE.LEARNING && p.state !== srs.STATE.RELEARN) continue;
+    if (!p.due || p.due - now >= srs.DAY_MS) continue;
+    rows.push({
+      ...p,
+      state: srs.STATE.LEARNING,
+      step: 0,
+      interval: 1,
+      due: now + srs.DAY_MS,
+      updated: now,
+    });
+  }
+  if (rows.length) await store.bulkPut('progress', rows);
+  return rows.length;
 }
 
 /* ===========================================================
@@ -1106,6 +1146,20 @@ function bindGlobalEvents() {
   }, 500);
   $('#inGoal').addEventListener('input', saveNum);
   $('#inAutoUpdate').addEventListener('change', e => saveSettings({ autoUpdate: e.target.checked }));
+
+  $('#inPacing').addEventListener('change', async e => {
+    const v = e.target.value;
+    await saveSettings({ pacing: v });
+    if (v === srs.PACING.CURVE) {
+      // 否则那些已经排到 1~10 分钟后的题会立刻冒出来，和"不要当日就做"矛盾
+      const n = await migrateLearningToCurve();
+      await refreshProgress();
+      renderStart();
+      if (n) toast(`已把 ${n} 道还在当天巩固的题顺延到明天`, 3000);
+    }
+    updatePacingHint();
+    renderStats();
+  });
   $('#inToken').addEventListener('change', e => saveSettings({ token: e.target.value.trim() }));
   $('#inGist').addEventListener('change', e => saveSettings({ gistId: e.target.value.trim() }));
   $('#inRepo').addEventListener('change', e => saveSettings({ repo: e.target.value.trim() }));

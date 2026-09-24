@@ -178,6 +178,18 @@
       </div>
 
       <div class="card">
+        <div class="card-title">错题复习节奏</div>
+        <div class="field">
+          <label>答错的题什么时候再出现</label>
+          <select class="input" id="inPacing">
+            <option value="curve">按遗忘曲线：隔天再见，之后逐级拉长</option>
+            <option value="cram">当天巩固：本轮再练一遍，分钟级重复</option>
+          </select>
+        </div>
+        <div class="muted small" id="pacingHint"></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">多设备同步 <span class="muted small">GitHub Gist</span></div>
         <div class="field">
           <label>GitHub Token（需要 gist 权限）</label>

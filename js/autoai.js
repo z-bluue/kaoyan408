@@ -126,7 +126,7 @@ export function pickTarget({ questions, progress, aiQuestions, state }) {
  * @param {object} opts  { max, onGenerated, onStatus }
  */
 export async function tick(input, { max = 99, onGenerated, onStatus } = {}) {
-  const { questions, progress, settings } = input;
+  const { questions, progress, settings, fixes = [] } = input;
   const st = await loadState();
 
   const gate = canRun(st, settings);
@@ -158,6 +158,7 @@ export async function tick(input, { max = 99, onGenerated, onStatus } = {}) {
     try {
       const { question } = await ai.generateSimilar(target.sources, settings, {
         onStage: onStatus ? (stage) => onStatus({ state: st, ran, stage }) : undefined,
+        fixes,
       });
 
       question.aiTopic = target.topic;

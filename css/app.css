@@ -250,6 +250,24 @@ b,strong{font-weight:600}
 #quizSummary{display:flex;flex-direction:column;gap:14px}
 #quizSummary[hidden]{display:none}
 
+/* AI 答案纠错面板 */
+.fix-panel{flex:1;display:flex;flex-direction:column;gap:8px}
+.fix-row{font-size:13px;color:var(--fg-dim);line-height:1.6}
+.fix-row b{color:var(--no)}
+.fix-panel .btn-row>.btn{flex:1;padding:10px 8px;font-size:14px}
+.fix-panel .chips{display:flex;gap:8px}
+.fix-panel .chips .chip{flex:1;text-align:center;font-size:15px;font-weight:600;padding:9px 0;border-radius:10px}
+.fix-panel .chips .chip.on{border-color:var(--acc);color:var(--acc);background:rgba(88,166,255,.12)}
+.fix-result{font-size:13px;line-height:1.65;border-radius:8px;padding:10px 12px;background:var(--bg-3);border:1px solid var(--line)}
+.fix-result[hidden]{display:none}
+.fix-result .fix-head{margin-bottom:6px}
+.fix-result .fix-reason{color:var(--fg-dim);white-space:pre-wrap;max-height:220px;overflow:auto}
+.fix-result.same{border-color:rgba(63,185,80,.5)}
+.fix-result.same .fix-head b{color:var(--ok)}
+.fix-result.differ{border-color:rgba(210,153,34,.6)}
+.fix-result.differ .fix-head b{color:#d29922}
+.fix-result.err{border-color:rgba(248,81,73,.6);color:var(--no)}
+
 /* ---------------- 错题本 ---------------- */
 .wrong-head .switch{align-self:flex-start}
 .chips{display:flex;flex-wrap:wrap;gap:8px}

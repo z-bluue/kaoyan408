@@ -57,6 +57,7 @@ const S = {
   wrongFilter: { subjects: new Set(), onlyUnmastered: true },
   bankWarnings: [],
   aiCount: 0,
+  aiFixes: [],
 };
 
 /* ===========================================================
@@ -91,6 +92,7 @@ async function loadBankAndProgress() {
   applyBankResult(await bank.loadBank(S.subjectsMeta));
   S.progress = new Map((await store.getAll('progress')).map(p => [p.id, p]));
   await loadAiQuestions();
+  S.aiFixes = await store.metaGet('aiFixes', []);
 }
 
 /** 把之前用 AI 生成过的题目也接入题库（它们沿用原题的科目/章节） */
@@ -321,6 +323,7 @@ function renderQuiz() {
   const p = S.progress.get(q.id);
   if (p && p.wrongCount) tagBits.push(`<span class="pill" style="color:#f85149">错过 ${p.wrongCount} 次</span>`);
   if (q.ai) tagBits.push('<span class="pill ai">AI 生成 · 答案请核对</span>');
+  if (q.aiFixedAt) tagBits.push(`<span class="pill ai">答案已纠正为 ${esc((q.answer || []).join(''))}</span>`);
   $('#qTag').innerHTML = tagBits.join('');
 
   // 题干
@@ -484,6 +487,15 @@ function renderSrsRow() {
     b.className = 'btn';
     b.id = 'btnAiGen';
     b.textContent = 'AI 出同类题';
+    foot.appendChild(b);
+  }
+  // AI 生成的题允许上报答案错误（已经人工纠正过就不再重复报）
+  if (q.ai && !q.aiFixedAt) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn';
+    b.id = 'btnAiFix';
+    b.textContent = '答案有误';
     foot.appendChild(b);
   }
   $('#btnNext').addEventListener('click', () => commitGrade(auto));
@@ -744,6 +756,7 @@ async function generateSimilarForCurrent(btn) {
   try {
     const { question } = await ai.generateSimilar(q, S.settings, {
       onStage: t => { btn.textContent = t; },
+      fixes: S.aiFixes,
     });
 
     await store.aiPut(question);
@@ -766,6 +779,190 @@ async function generateSimilarForCurrent(btn) {
     btn.textContent = 'AI 出同类题（重试）';
     toast('AI 出题失败：' + e.message, 4500);
   }
+}
+
+/* ---------------- AI 答案纠错 ---------------- */
+let fixPicked = null;      // 手动选中的正确选项
+let recheckPending = null; // AI 重算得出的选项，等用户点头采纳
+const AI_FIX_KEEP = 20;
+
+/** 展开纠错面板（就地在答题页操作，不用跳页） */
+function openFixPanel() {
+  const st = S.quiz;
+  if (!st || !st.q) return;
+  const q = st.q;
+  fixPicked = null;
+  recheckPending = null;
+  const letters = (q.options || []).map(o => o.key);
+  const canAskAi = !!(S.settings.aiKey && S.settings.aiEnabled);
+  $('#quizFoot').innerHTML = `
+    <div class="fix-panel">
+      <div class="fix-row">
+        这道题 AI 给的答案是 <b>${esc((q.answer || []).join(''))}</b>。
+        你知道正确答案就点下面，拿不准就让 AI 重算一遍：
+      </div>
+      <div class="chips" id="fixLetters">
+        ${letters.map(k => `<div class="chip" data-fix="${esc(k)}">${esc(k)}</div>`).join('')}
+      </div>
+      <input class="input" id="fixNote" type="text" autocomplete="off"
+             placeholder="补充说明（可选）：比如错在哪、为什么" style="margin-top:8px">
+      <div class="fix-result" id="fixResult" hidden></div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn" id="fixCancel" type="button">取消</button>
+        <button class="btn" id="fixRecheck" type="button"${canAskAi ? '' : ' disabled'}>AI 重算</button>
+        <button class="btn danger" id="fixDelete" type="button">删掉这题</button>
+      </div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn primary" id="fixSubmit" type="button">按上面选的答案纠正</button>
+      </div>
+      ${canAskAi ? '' : '<div class="muted small">未配置 API Key，「AI 重算」不可用</div>'}
+    </div>`;
+}
+
+/** 提交纠正：就地改答案 + 记入纠正历史（之后会作为反面例子发给 AI） */
+async function submitFix() {
+  if (!fixPicked) { toast('先点一下正确的选项'); return; }
+  const q = S.quiz && S.quiz.q;
+  if (q && fixPicked === (q.answer || []).join('')) { toast('和原答案一样，不用纠正'); return; }
+  await applyFixAnswer(fixPicked, fixNote(), '');
+}
+
+/**
+ * 让 AI 抛开原答案独立重算一遍（用户拿不准答案时用）。
+ * AI 算出来和原答案一致 → 告诉用户原答案没问题；
+ * 不一致 → 给个「采纳」按钮，由用户拍板，绝不自动改。
+ */
+async function recheckCurrent(btn) {
+  const st = S.quiz;
+  if (!st || !st.q) return;
+  const box = $('#fixResult');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '重算中…';
+  if (box) {
+    box.hidden = false;
+    box.className = 'fix-result';
+    box.innerHTML = '<span class="muted">AI 正在独立重算这道题（通常 10~30 秒）…</span>';
+  }
+
+  try {
+    const r = await ai.recheckQuestion(st.q, S.settings, { fixes: S.aiFixes });
+    const current = (st.q.answer || []).join('');
+    const conf = { high: '较有把握', medium: '一般', low: '不太确定' }[r.confidence] || '一般';
+    const body = `<div class="fix-reason">${richText(r.reason)}</div>`;
+
+    if (r.answer === current) {
+      recheckPending = null;
+      box.className = 'fix-result same';
+      box.innerHTML =
+        `<div class="fix-head">AI 独立重算后，答案仍然是 <b>${esc(r.answer)}</b>（${conf}）</div>`
+        + body
+        + '<div class="muted small">它算得和你一样，那这道题多半没错 —— 是你自己看错了，回头对着解析再想一遍。</div>';
+    } else {
+      recheckPending = r.answer;
+      box.className = 'fix-result differ';
+      box.innerHTML =
+        `<div class="fix-head">AI 重算得出 <b>${esc(r.answer)}</b>，但题库里写的是 <b>${esc(current)}</b>（${conf}）</div>`
+        + body
+        + '<div class="muted small">核对一下它的推导，如果没问题就采纳（改动会记下来，以后的 AI 题不会重复这个错）。</div>'
+        + `<div class="btn-row" style="margin-top:8px">
+             <button class="btn primary" id="fixAdopt" type="button">采纳 ${esc(r.answer)}</button>
+           </div>`;
+    }
+  } catch (e) {
+    recheckPending = null;
+    if (box) {
+      box.className = 'fix-result err';
+      box.textContent = '重算失败：' + e.message;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+/** 采纳 AI 重算的结果 */
+async function adoptRecheck() {
+  if (!recheckPending) return;
+  const note = fixNote();
+  await applyFixAnswer(recheckPending, note, 'AI 重算');
+}
+
+function fixNote() {
+  return String(($('#fixNote') || {}).value || '').trim();
+}
+
+/** 真正落地一次纠正：改题、存库、记历史、刷新界面 */
+async function applyFixAnswer(picked, note, tag) {
+  const st = S.quiz;
+  if (!st || !st.q) return;
+  const q = st.q;
+  const from = (q.answer || []).join('');
+  if (picked === from) { toast('和原答案一样，不用纠正'); return; }
+
+  const why = [tag, note].filter(Boolean).join('，');
+  const fixed = {
+    ...q,
+    answer: [picked],
+    aiOriginalAnswer: from,
+    aiFixNote: why,
+    aiFixedAt: Date.now(),
+    aiFixedBy: tag || 'manual',
+    explain: `⚠️ 本题原答案 ${from} 有误，已改为 ${picked}${tag ? `（${tag}）` : ''}。`
+      + (note ? `\n纠正说明：${note}` : '')
+      + `\n\n—— 以下是模型原来的解析，仅供参考 ——\n${q.explain || ''}`,
+  };
+
+  await store.aiPut(fixed);
+  S.byId.set(fixed.id, fixed);
+  const idx = S.questions.findIndex(x => x.id === fixed.id);
+  if (idx >= 0) S.questions[idx] = fixed;
+
+  const list = [{
+    qid: fixed.id,
+    stem: String(q.stem).slice(0, 42),
+    from,
+    to: picked,
+    note: why,
+    at: Date.now(),
+  }, ...(S.aiFixes || [])].slice(0, AI_FIX_KEEP);
+  S.aiFixes = list;
+  await store.metaSet('aiFixes', list);
+
+  // 用户当时选的其实就是正确答案，说明他本来就对，把对错判定一起纠回来
+  const wasRight = st.picked && st.picked.size === 1 && [...st.picked][0] === picked;
+  st.q = fixed;
+  if (wasRight) st.correct = true;
+  showFeedback();
+
+  renderStart(); renderWrong(); renderMe();
+  autoSyncSoon();
+  toast(`已纠正为 ${picked}，之后的 AI 出题会参考它`, 3200);
+}
+
+/** 直接删掉这道 AI 题（答案错得没法救时用） */
+async function deleteAiQuestion() {
+  const st = S.quiz;
+  const q = st && st.q;
+  if (!q) return;
+  if (!confirm('从题库里彻底删掉这道题？答题记录也会一起清掉。')) return;
+
+  await store.aiDelete(q.id);
+  try { await store.del('progress', q.id); } catch (_) { /* 可能本来就没有记录 */ }
+  try { await store.deleteLogsByQid(q.id); } catch (_) { /* 同上 */ }
+
+  S.byId.delete(q.id);
+  S.questions = S.questions.filter(x => x.id !== q.id);
+  S.progress.delete(q.id);
+  S.aiCount = S.questions.filter(x => x.ai).length;
+
+  // 队列里也要剔掉，否则下一轮会卡在一个不存在的题上
+  if (S.session) S.session.queue = S.session.queue.filter(id => S.byId.has(id));
+
+  renderStart(); renderWrong(); renderStats(); renderMe();
+  autoSyncSoon();
+  toast('已删除这道题');
+  if (S.session) renderQuiz();
 }
 
 /* ---------------- 自动出题调度 ---------------- */
@@ -791,6 +988,7 @@ async function runAutoAi(max = 3, { force = false } = {}) {
     questions: S.questions,
     progress: S.progress,
     settings,
+    fixes: S.aiFixes,
   }, {
     max,
     onGenerated: async (q, target) => {
@@ -824,6 +1022,8 @@ async function renderAiPanel(state, reason, isError) {
     ['上次运行', st.lastRun ? fmtRelative(st.lastRun) : '还没跑过'],
   ];
   if (st.lastTopic) rows.push(['最近补题', st.lastTopic]);
+  const fixN = (S.aiFixes || []).length;
+  if (fixN) rows.push(['已纠正', `${fixN} 道（会作为反面例子告诉 AI）`]);
   host.innerHTML = rows.map(([k, v]) => `<div><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join('');
 
   const noteEl = $('#aiNote');
@@ -1033,6 +1233,19 @@ function bindGlobalEvents() {
       await generateSimilarForCurrent(e.target.closest('#btnAiGen'));
       return;
     }
+    if (e.target.closest('#btnAiFix')) { openFixPanel(); return; }
+    if (e.target.closest('#fixCancel')) { recheckPending = null; renderSrsRow(); return; }
+    if (e.target.closest('#fixRecheck')) { await recheckCurrent(e.target.closest('#fixRecheck')); return; }
+    if (e.target.closest('#fixAdopt')) { await adoptRecheck(); return; }
+    if (e.target.closest('#fixSubmit')) { await submitFix(); return; }
+    if (e.target.closest('#fixDelete')) { await deleteAiQuestion(); return; }
+    const fixChip = e.target.closest('#fixLetters .chip');
+    if (fixChip) {
+      fixPicked = fixChip.dataset.fix;
+      document.querySelectorAll('#fixLetters .chip').forEach(c =>
+        c.classList.toggle('on', c.dataset.fix === fixPicked));
+      return;
+    }
     if (e.target.closest('#btnShowRef')) {
       S.quiz.answered = true;
       S.quiz.ts = Date.now();
@@ -1233,6 +1446,9 @@ function bindGlobalEvents() {
     const st = await autoAi.loadState();
     st.topics = {};
     await autoAi.saveState(st);
+    // 纠正历史也一起清掉
+    S.aiFixes = [];
+    await store.metaSet('aiFixes', []);
 
     S.questions = S.questions.filter(q => !q.ai);
     for (const [id, q] of [...S.byId]) if (q.ai) S.byId.delete(id);

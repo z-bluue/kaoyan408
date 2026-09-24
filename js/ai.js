@@ -44,7 +44,7 @@ const SYSTEM_PROMPT = `你是一位资深的考研计算机学科专业基础综
 7. topics 填 2~4 个具体知识点关键词，需与考查内容相关。
 8. 题干中如果需要代码或公式，用纯文本描述即可。`;
 
-function buildUserPrompt(sources) {
+function buildUserPrompt(sources, fixes) {
   const blocks = sources.map((q, i) => {
     const opts = (q.options || []).map(o => `${o.key}. ${o.text}`).join('\n');
     const picked = Array.isArray(q.lastWrongPick) && q.lastWrongPick.length
@@ -67,7 +67,22 @@ function buildUserPrompt(sources) {
     ? `以下是我做错的 ${sources.length} 道题，它们涉及相近的知识点：`
     : '以下是我做错的一道题：';
 
-  return `${head}\n\n${blocks}\n\n请诊断这些错题暴露出来的薄弱点，然后生成一道新的单选题，以 json 输出。`;
+  return `${head}\n\n${blocks}\n\n请诊断这些错题暴露出来的薄弱点，然后生成一道新的单选题，以 json 输出。`
+    + buildFixHint(fixes);
+}
+
+/**
+ * 把用户上报的「你上次这题答案错了」拼进提示词。
+ * 这是让模型别反复犯同类错误的唯一手段。
+ */
+function buildFixHint(fixes) {
+  if (!Array.isArray(fixes) || !fixes.length) return '';
+  const lines = fixes.slice(0, 5).map((f, i) => {
+    const note = f.note ? `，错因：${f.note}` : '';
+    return `${i + 1}. 题目「${f.stem}…」你当时给的答案是 ${f.from}，正确答案是 ${f.to}${note}`;
+  });
+  return `\n\n【你之前出过的错，这次务必避免】\n${lines.join('\n')}`
+    + `\n（尤其是计算类题目，请把每一步都算一遍再定答案，不要凭感觉）`;
 }
 
 /* ---------------- 网络 ---------------- */
@@ -217,9 +232,11 @@ export function validateGenerated(raw) {
 /**
  * 根据错题生成同类新题。
  * @param {object|object[]} sources 一道或多道错题（多道时需涉及相近知识点）
+ * @param {object} settings { aiKey, aiModel, aiFast }
+ * @param {object} opts { retries, onStage, fixes }
  * @returns {Promise<{question:object, usage:object|null}>}
  */
-export async function generateSimilar(sources, settings, { retries = 1, onStage } = {}) {
+export async function generateSimilar(sources, settings, { retries = 1, onStage, fixes = [] } = {}) {
   const list = (Array.isArray(sources) ? sources : [sources]).filter(q => q && q.stem);
   if (!list.length) throw new Error('缺少可参考的错题');
 
@@ -229,7 +246,7 @@ export async function generateSimilar(sources, settings, { retries = 1, onStage 
   const model = settings.aiModel || 'deepseek-flash';
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: buildUserPrompt(list) },
+    { role: 'user', content: buildUserPrompt(list, fixes) },
   ];
 
   let lastErr = null;
@@ -257,6 +274,91 @@ export async function generateSimilar(sources, settings, { retries = 1, onStage 
     }
   }
   throw lastErr || new Error('AI 出题失败，请重试');
+}
+
+/* ---------------- 答案复核（让 AI 重新算一遍） ---------------- */
+const RECHECK_PROMPT = `你是一位严谨的考研计算机学科专业基础综合（408）阅卷老师，正在复核一道单选题的答案。
+
+请把这道题当成全新题目**独立重做一遍**：不要预设给出的原答案是对的，也不要用原解析倒推结论。
+- 计算类题目（进制、浮点、存储器容量、CPU 时间、流水线加速比、页面置换等）必须一步一步算出结果，把关键中间值写清楚，最后再对选项；
+- 概念类题目要说明判断依据（出自哪条定义、协议层次、定理）。
+- 算完后自己再检查一遍：有没有算错、有没有看漏题干条件、有没有把单位搞混。
+
+严格输出 json（不要 markdown 代码块，不要任何额外文字），结构如下：
+{
+  "answer": "B",
+  "reason": "你的完整推导过程",
+  "confidence": "high"
+}
+answer 只能是一个选项字母；confidence 取 high / medium / low。`;
+
+/** 校验复核结果；不能确认合法就不放行 */
+function validateRecheck(raw, question) {
+  const errs = [];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, errs: ['返回内容不是 JSON 对象'] };
+  }
+  const answer = String(raw.answer ?? '').trim().toUpperCase().slice(0, 1);
+  if (!/^[A-D]$/.test(answer)) errs.push('没有给出有效的选项字母');
+  else if (Array.isArray(question.options) && question.options.length
+    && !question.options.some(o => o.key === answer)) {
+    errs.push(`重算结果 ${answer} 不在选项中`);
+  }
+  const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
+  if (reason.length < 5) errs.push('没有给出推导过程');
+  const confidence = ['high', 'medium', 'low'].includes(raw.confidence) ? raw.confidence : 'medium';
+  return { ok: errs.length === 0, errs, value: { answer, reason, confidence } };
+}
+
+/**
+ * 让 AI 抛开原答案，独立重算这道题的正确答案。
+ * 用于用户怀疑 AI 出题答案有误时，先让模型自己复核一遍。
+ * @param {object} question 待复核的题目
+ * @param {object} settings { aiKey, aiModel, aiFast }
+ * @param {object} opts { fixes } 历史纠错，避免它又犯同类错
+ * @returns {Promise<{answer:string, reason:string, confidence:string, model:string}>}
+ */
+export async function recheckQuestion(question, settings, { fixes = [] } = {}) {
+  const key = String(settings.aiKey || '').trim();
+  if (!key) throw new Error('请先到「我的 → AI 出题」填写 DeepSeek API Key');
+  if (!question || !question.stem) throw new Error('缺少题目内容');
+
+  const model = settings.aiModel || 'deepseek-flash';
+  const opts = (question.options || []).map(o => `${o.key}. ${o.text}`).join('\n');
+  const user = [
+    `章节：${question.chapter || '（未标注）'}`,
+    (question.topics && question.topics.length) ? `知识点：${question.topics.join('、')}` : '',
+    `题干：${question.stem}`,
+    '选项：',
+    opts || '（无）',
+    `原答案：${(question.answer || []).join('')}`,
+    question.explain ? `原解析：${question.explain}` : '',
+  ].filter(Boolean).join('\n') + buildFixHint(fixes);
+
+  const messages = [
+    { role: 'system', content: RECHECK_PROMPT },
+    { role: 'user', content: user },
+  ];
+
+  let lastErr = null;
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      // 复核要稳：温度压低，尽量避免它随机换答案
+      const out = await callAPI({
+        key, model, messages,
+        temperature: attempt === 0 ? 0.3 : 0.6,
+        disableThinking: settings.aiFast !== false,
+      });
+      const parsed = JSON.parse(stripFences(out.content));
+      const v = validateRecheck(parsed, question);
+      if (v.ok) return { ...v.value, model, usage: out.usage };
+      lastErr = new Error('AI 复算结果不合法：' + v.errs.join('；'));
+    } catch (e) {
+      if (e.fatal) throw e;
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('AI 复算失败，请重试');
 }
 
 /** 把模型返回的内容包装成应用内部的题目结构 */
@@ -302,4 +404,7 @@ export async function testConnection(settings) {
   return { model: out.model, usage: out.usage };
 }
 
-export default { AI_MODELS, generateSimilar, validateGenerated, buildQuestion, testConnection };
+export default {
+  AI_MODELS, generateSimilar, validateGenerated, buildQuestion,
+  testConnection, buildFixHint, recheckQuestion,
+};

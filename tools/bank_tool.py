@@ -10,6 +10,7 @@
 
     # 2. 生成 / 更新 data/bank-manifest.json（改了题目后必须跑一次）
     python tools/bank_tool.py build
+    #    同时会刷新 data/figures.json（插图清单，Service Worker 据此预缓存）
 
     # 3. 看题库统计
     python tools/bank_tool.py stats
@@ -35,6 +36,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 SUBJECTS_FILE = os.path.join(DATA, "subjects.json")
 MANIFEST_FILE = os.path.join(DATA, "bank-manifest.json")
+FIGURE_FILE = os.path.join(DATA, "figures.json")
+
+IMG_SRC_RE = re.compile(r'<img\b[^>]*\bsrc="([^"]+)"', re.I)
 
 VALID_TYPES = {"single", "multi", "judge", "fill", "short"}
 
@@ -276,6 +280,38 @@ def cmd_validate(args):
 # --------------------------------------------------------------------------
 # build manifest
 # --------------------------------------------------------------------------
+def collect_figures(subjects):
+    """扫描题库里引用到的站内插图，写出 data/figures.json。
+
+    Service Worker 装的时候读这份清单，把插图全部预缓存下来（断网也能看图）。
+    跨域图片不列，不归我们管。清单没变就不重写文件，避免 CI 多出无意义的提交。
+    """
+    found = set()
+    for sm in subjects:
+        path = subject_file(sm["id"])
+        if not os.path.exists(path):
+            continue
+        raw = load_json(path)
+        for q in raw.get("questions") or []:
+            texts = [q.get("stem"), q.get("explain")]
+            texts += [o.get("text") for o in (q.get("options") or [])]
+            for t in texts:
+                for src in IMG_SRC_RE.findall(str(t or "")):
+                    if re.match(r"^https?:", src, re.I):
+                        continue
+                    found.add(re.sub(r"^\./", "", src))
+
+    files = sorted(found)
+    missing = [f for f in files if not os.path.exists(os.path.join(ROOT, f))]
+    payload = {"count": len(files), "files": files}
+
+    old = load_json(FIGURE_FILE) if os.path.exists(FIGURE_FILE) else None
+    if not old or {k: v for k, v in old.items() if k != "generated"} != payload:
+        payload["generated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        dump_json(FIGURE_FILE, payload)
+    return files, missing
+
+
 def cmd_build(args):
     subjects = load_subjects()
     old = load_json(MANIFEST_FILE) if os.path.exists(MANIFEST_FILE) else {}
@@ -363,6 +399,15 @@ def cmd_build(args):
         mark = "★ 有更新" if sid in changed_ids else ""
         print("  %-5s %-12s %4d 题   v%s  %s" % (sid, info["name"], info["count"], info["version"], mark))
     print("  合计 %d 题" % total)
+
+    figs, missing = collect_figures(subjects)
+    print("  配图 %d 张" % len(figs), end="")
+    if missing:
+        print("，**%d 张找不到文件**：" % len(missing))
+        for f in missing[:10]:
+            print("      缺失 %s" % f)
+    else:
+        print("（均已就位）")
 
 
 # --------------------------------------------------------------------------

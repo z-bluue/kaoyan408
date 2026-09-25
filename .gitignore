@@ -19,6 +19,7 @@ venv/
 
 # ---------- 构建产物 / 临时文件 ----------
 _site/
+_relax/
 node_modules/
 *.log
 *.tmp

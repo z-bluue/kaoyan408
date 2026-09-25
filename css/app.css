@@ -215,6 +215,17 @@ b,strong{font-weight:600}
   background:rgba(47,129,247,.15);color:#79c0ff;border-radius:4px;padding:1px 5px;
   font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:.92em;
 }
+
+/* 上下标：题库里大量公式靠 <sup>/<sub> 表达，别把它们挤得太小 */
+.q-stem sup,.q-stem sub,
+.opt .txt sup,.opt .txt sub,
+.feedback sup,.feedback sub,.fix-result sup,.fix-result sub{font-size:.72em}
+
+/* 题目配图：原图是白底扫描裁剪，给个白底圆角免得在黑主题里糊成一片 */
+.q-stem img,.opt .txt img,.feedback img,.fix-result img{
+  display:block;max-width:100%;height:auto;margin:10px 0;
+  background:#fff;border-radius:8px;padding:6px;
+}
 .feedback.ok{border-left-color:var(--ok)}
 .feedback.no{border-left-color:var(--no)}
 .feedback .fb-head{font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}

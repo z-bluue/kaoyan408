@@ -10,7 +10,7 @@ import * as srs from './srs.js';
 import * as ai from './ai.js';
 import * as autoAi from './autoai.js';
 import {
-  $, esc, richText, toast, openSheet, closeSheet,
+  $, esc, richText, plainText, toast, openSheet, closeSheet,
   dayKey, fmtRelative, shuffle, uniq, pct, normAnswer, debounce,
 } from './ui.js';
 
@@ -649,7 +649,7 @@ function renderWrong() {
         <span>${esc(q.subjectName || q.subject)} · ${esc(q.chapter)}</span>
         <span class="bad-no">错 ${p.wrongCount} 次${p.lastCorrect === false ? ' · 上次仍错' : ''}</span>
       </div>
-      <div class="it-stem">${richText(q.stem)}</div>
+      <div class="it-stem">${esc(plainText(q.stem, 90))}</div>
       <div class="it-foot">
         ${(q.topics || []).slice(0, 3).map(t => `<span>${esc(t)}</span>`).join('')}
         <span>${fmtRelative(p.lastSeen)}</span>
@@ -920,7 +920,7 @@ async function applyFixAnswer(picked, note, tag) {
 
   const list = [{
     qid: fixed.id,
-    stem: String(q.stem).slice(0, 42),
+    stem: plainText(q.stem, 42),
     from,
     to: picked,
     note: why,

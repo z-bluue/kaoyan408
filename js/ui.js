@@ -14,11 +14,52 @@ export function esc(s) {
 
 /* ---------------- 轻量 Markdown 渲染 ---------------- */
 
-/** 行内：粗体 + 行内代码 */
+/**
+ * 行内白名单 HTML：只放行 <sup>/<sub> 和站内、HTTPS 的插图。
+ * 题库里（尤其是外部导入的题）公式靠上下标表达，配图靠 <img>，
+ * 所以这两类必须留着；其余标签一律转义成文本，避免注入。
+ */
+const INLINE_KEEP = /<sup>|<\/sup>|<sub>|<\/sub>|<img\b[^>]*>/gi;
+// 只收两种 src：不带前导斜杠的同源相对路径（如 assets/relax/a.png），或 https 绝对地址。
+// 这样 //evil.com/x.png、javascript:、data: 都会被拒掉。
+const SAFE_SRC = /^(?:\.\/)?[\w-]+(?:\/[\w.-]+)*\.(?:png|jpe?g|webp|gif|svg)$|^https:\/\/[\w.-]+(?:\/[\w.%\-]+)+\.(?:png|jpe?g|webp|gif|svg)$/i;
+
+function protectInline(s) {
+  const keep = [];
+  const text = String(s ?? '').replace(INLINE_KEEP, tag => {
+    let out = tag.toLowerCase();
+    if (out.startsWith('<img')) {
+      const src = (tag.match(/\bsrc\s*=\s*"([^"]*)"/i) || [])[1] || '';
+      if (!SAFE_SRC.test(src)) return '';
+      out = `<img src="${src}" alt="" loading="lazy">`;
+    }
+    keep.push(out);
+    return `\u0000${keep.length - 1}\u0000`;
+  });
+  return { text, keep };
+}
+
+/** 行内：粗体 + 行内代码（外加白名单 HTML） */
 function inline(s) {
-  return esc(s)
+  const { text, keep } = protectInline(s);
+  return esc(text)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>');
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => keep[Number(i)] || '');
+}
+
+/** 去掉标记，得到用于列表预览的纯文本 */
+export function plainText(s, max = 0) {
+  let t = String(s ?? '')
+    .replace(/<img\b[^>]*>/gi, '[图]')
+    .replace(/<\/?(?:sup|sub)>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (max && t.length > max) t = t.slice(0, max) + '…';
+  return t;
 }
 
 /** 表格分隔行，例如 |---|:--:|---| */
@@ -193,6 +234,6 @@ export function normAnswer(s) {
 }
 
 export default {
-  $, $$, esc, richText, toast, openSheet, closeSheet, on,
+  $, $$, esc, richText, plainText, toast, openSheet, closeSheet, on,
   dayKey, startOfDay, fmtDateTime, fmtRelative, shuffle, uniq, pct, debounce, normAnswer,
 };

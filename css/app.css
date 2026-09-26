@@ -224,8 +224,22 @@ b,strong{font-weight:600}
 /* 题目配图：原图是白底扫描裁剪，给个白底圆角免得在黑主题里糊成一片 */
 .q-stem img,.opt .txt img,.feedback img,.fix-result img{
   display:block;max-width:100%;height:auto;margin:10px 0;
-  background:#fff;border-radius:8px;padding:6px;
+  background:#fff;border-radius:8px;padding:6px;cursor:zoom-in;
 }
+
+/* 配图放大查看：原尺寸显示，不足一屏就居中，超过就拖动 */
+.fig-zoom{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.94);overflow:auto;padding:14px;touch-action:pinch-zoom;-webkit-overflow-scrolling:touch}
+.fig-zoom[hidden]{display:none}
+.fig-zoom img{display:block;margin:0 auto;width:auto;max-width:none;height:auto;background:#fff;border-radius:8px}
+.fig-zoom img.fit{width:100%;max-width:100%;height:auto}
+.fig-zoom-close{position:fixed;top:calc(10px + var(--sat));right:12px;z-index:2;
+  background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);color:#fff;
+  font-size:13px;padding:6px 14px;border-radius:999px;cursor:pointer}
+.fig-zoom-hint{position:fixed;left:12px;right:12px;bottom:calc(12px + var(--sab));text-align:center;
+  font-size:11.5px;line-height:1.5;color:#c9d1d9;opacity:.75;pointer-events:none}
+
+/* 「图被缩小了，点一下看原尺寸」这行提示 */
+.fig-tip{font-size:11.5px;color:var(--fg-mute);margin:-4px 0 10px}
 .feedback.ok{border-left-color:var(--ok)}
 .feedback.no{border-left-color:var(--no)}
 .feedback .fb-head{font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}

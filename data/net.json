@@ -1,7 +1,7 @@
 {
   "id": "net",
   "name": "计算机网络",
-  "version": "20260925.8",
+  "version": "20260926.2",
   "questions": [
     {
       "id": "net-001",
@@ -7112,41 +7112,6 @@
       "source": "RELAX 1000题 · p4c3q87"
     },
     {
-      "id": "rx-p4c3q88",
-      "chapter": "数据链路层",
-      "topics": [
-        "数据链路层",
-        "交换机"
-      ],
-      "type": "single",
-      "difficulty": 3,
-      "stem": "某局域网网络拓扑如下图所示，所有交换机初始表均为空，并采用存储转发方式。首先H1 向H2 发送一个数据帧，随后H3 向H1 发送一个数据帧。此时，S2 的转发表包含哪些信息？",
-      "options": [
-        {
-          "key": "A",
-          "text": "<H1，1>、<H3，2>"
-        },
-        {
-          "key": "B",
-          "text": "<H1，1>、<H3，3>"
-        },
-        {
-          "key": "C",
-          "text": "<H1，1>、<H2，2>"
-        },
-        {
-          "key": "D",
-          "text": "<H3，2>"
-        }
-      ],
-      "answer": [
-        "A"
-      ],
-      "accept": [],
-      "explain": "H1 向H2 发送一个数据帧，S1 无法在表中找到对应条目，会将其从除了端口1外所有端口进行转发，S2 收到后通过自学习，增加表项<H1，1>。H3 向H1 发送一个数据帧，S2 通过自学习增加表项<H3，2>。",
-      "source": "RELAX 1000题 · p4c3q88"
-    },
-    {
       "id": "rx-p4c3q89",
       "chapter": "数据链路层",
       "topics": [
@@ -9672,41 +9637,6 @@
       "accept": [],
       "explain": "OSPF 虽然没有使用TCP，但它在协议内部自己设计了复杂的确认和重传机制，足以保证其链路状态信息的可靠同步。因此，OSPF 是可靠的路由协议，故D 错误。",
       "source": "RELAX 1000题 · p4c4q65"
-    },
-    {
-      "id": "rx-p4c4q66",
-      "chapter": "网络层",
-      "topics": [
-        "网络层",
-        "OSPF"
-      ],
-      "type": "single",
-      "difficulty": 3,
-      "stem": "下图所示的网络中，采用了OSPF 来配置路由器。如果要从NetA 到达NetB，应该选择哪条路径?",
-      "options": [
-        {
-          "key": "A",
-          "text": "R1，R2，R5，R7"
-        },
-        {
-          "key": "B",
-          "text": "R1，R3，R5，R6，R7"
-        },
-        {
-          "key": "C",
-          "text": "R1，R3，R5，R7"
-        },
-        {
-          "key": "D",
-          "text": "R1，R3，R6，R7"
-        }
-      ],
-      "answer": [
-        "C"
-      ],
-      "accept": [],
-      "explain": "OSPF采用最短路径优先算法计算最优路径，从Net A到Net B的最优路径是R1-R3-R5-R7，开销是2+5+7+14+2=30，最小开销的那条。",
-      "source": "RELAX 1000题 · p4c4q66"
     },
     {
       "id": "rx-p4c4q67",

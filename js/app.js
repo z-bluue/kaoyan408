@@ -20,7 +20,8 @@ const DEFAULT_SETTINGS = {
   autoUpdate: true,
   // 复习节奏：默认按遗忘曲线（答错的题当天不再安排，隔天再见）
   pacing: 'curve',
-  repo: '',
+  // 题库更新源默认指向本仓库：autoUpdate 默认开着，这样题库改了能自动同步到手机
+  repo: 'z-bluue/kaoyan408',
   branch: 'main',
   mirror: 'jsdelivr',
   token: '',
@@ -66,6 +67,8 @@ const S = {
 async function boot() {
   bindGlobalEvents();
   S.settings = { ...DEFAULT_SETTINGS, ...(await store.metaGet('settings', {})) };
+  // 老版本存下来的空 repo 补上默认值，否则「检查更新」永远拿不到题库
+  if (!S.settings.repo) S.settings.repo = DEFAULT_SETTINGS.repo;
 
   try {
     await loadBankAndProgress();
@@ -297,6 +300,48 @@ function endSession(showSummary = true) {
 }
 
 /* ===========================================================
+   配图放大
+   =========================================================== */
+function openFigZoom(img) {
+  const z = $('#figZoom');
+  const big = $('#figZoomImg');
+  big.classList.remove('fit');
+  big.src = img.currentSrc || img.src;
+  z.hidden = false;
+  z.scrollTop = 0;
+  z.scrollLeft = 0;
+}
+
+function closeFigZoom() {
+  const z = $('#figZoom');
+  z.hidden = true;
+  $('#figZoomImg').removeAttribute('src');   // 断开引用，免得占着内存
+}
+
+/**
+ * 宽图在手机屏上会被缩到很小，字就糊了。
+ * 凡是「原图宽度 > 显示宽度 1.6 倍」的图，后面补一行提示，否则用户不知道能点开。
+ */
+function markZoomable(root) {
+  if (!root) return;
+  root.querySelectorAll('img').forEach(im => {
+    const check = () => {
+      const box = im.parentElement;
+      const cw = box ? box.clientWidth : 0;
+      if (!im.naturalWidth || !cw || im.dataset.zoomTip) return;
+      if (im.naturalWidth / cw < 1.6) return;
+      im.dataset.zoomTip = '1';
+      const tip = document.createElement('div');
+      tip.className = 'fig-tip';
+      tip.textContent = '图被缩小了，点一下看原尺寸';
+      im.insertAdjacentElement('afterend', tip);
+    };
+    if (im.complete) check();
+    else im.addEventListener('load', check, { once: true });
+  });
+}
+
+/* ===========================================================
    刷题渲染
    =========================================================== */
 function renderQuiz() {
@@ -336,6 +381,7 @@ function renderQuiz() {
         : q.type === 'judge' ? '（判断题）' : '';
   $('#qStem').innerHTML =
     (typeHint ? `<span class="q-hint">${typeHint}</span>` : '') + richText(q.stem);
+  markZoomable($('#qStem'));
 
   // 选项
   const opts = $('#qOptions');
@@ -357,6 +403,7 @@ function renderQuiz() {
     opts.innerHTML = q.options.map(o =>
       `<div class="opt" data-key="${esc(o.key)}"><span class="key">${esc(o.key)}</span><span class="txt">${richText(o.text)}</span></div>`
     ).join('');
+    markZoomable(opts);
   } else if (q.type === 'fill') {
     fill.hidden = false;
     $('#fillInput').value = '';
@@ -460,6 +507,7 @@ function showFeedback() {
     ${q.source ? `<div class="muted small" style="margin-top:8px">来源：${esc(q.source)}</div>` : ''}
   `;
   fb.hidden = false;
+  markZoomable(fb);
 
   $('#quizFoot').innerHTML = '';
   renderSrsRow();
@@ -1254,6 +1302,29 @@ function bindGlobalEvents() {
     pendingMode = b.dataset.mode;
     renderScopeSheet();
     openSheet('#scopeSheet');
+  });
+
+  // 配图：点一下放大看（宽图在手机上是缩过的，代码/表格字会很小）
+  document.addEventListener('click', e => {
+    const z = $('#figZoom');
+    const im = e.target.closest('img');
+
+    if (!z.hidden) {
+      if (e.target.closest('#figZoomClose')) return closeFigZoom();
+      if (im && im.id === 'figZoomImg') {          // 点图本身：切换 原尺寸 / 适应宽度
+        im.classList.toggle('fit');
+        return;
+      }
+      if (e.target === z || e.target.closest('#figZoomHint')) return closeFigZoom();
+      return;
+    }
+
+    if (!im || !im.src) return;
+    if (!im.closest('#qStem, #qOptions, #qFeedback, .fix-result')) return;
+    openFigZoom(im);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('#figZoom').hidden) closeFigZoom();
   });
 
   // 选项

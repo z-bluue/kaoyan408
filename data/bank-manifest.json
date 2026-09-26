@@ -1,7 +1,7 @@
 {
-  "version": "20260925.8",
-  "generated": "2026-09-25 16:30:50",
-  "count": 1659,
+  "version": "20260926.2",
+  "generated": "2026-09-26 18:59:51",
+  "count": 1656,
   "subjects": {
     "ds": {
       "file": "ds.json",
@@ -22,18 +22,18 @@
     "os": {
       "file": "os.json",
       "name": "操作系统",
-      "count": 421,
-      "version": "20260925.7",
-      "sha256": "45ed0f2d2e7c63215ec00d393889c31407e8d0acdd7a497666e80f3412b5e793",
-      "bytes": 697842
+      "count": 420,
+      "version": "20260926.1",
+      "sha256": "55da3355c429b547575e0b25686f356cb4be5c8060c7990b88593d9f0f7003fa",
+      "bytes": 696129
     },
     "net": {
       "file": "net.json",
       "name": "计算机网络",
-      "count": 406,
-      "version": "20260925.8",
-      "sha256": "f256ed10c4dd2f97002135d92ce5319fde8b63ae7a118650a7dbba950ecc9f13",
-      "bytes": 554360
+      "count": 404,
+      "version": "20260926.2",
+      "sha256": "7baeafb802981e4ab65ad6dfe227ff75663a0ef2e26037f51ae9ef2284e00994",
+      "bytes": 552245
     }
   }
 }

@@ -2,7 +2,7 @@
    Service Worker —— 应用外壳离线可用，题库走网络优先
    改动静态资源后，把 VERSION 加一即可让手机端拿到新版本
    =========================================================== */
-const VERSION = 'v1.2.1';
+const VERSION = 'v1.2.2';
 const SHELL_CACHE = `kaoyan408-shell-${VERSION}`;
 const DATA_CACHE = `kaoyan408-data-${VERSION}`;
 // 配图单独放一个不跟版本号走的缓存：图片基本不变，版本升级不该让用户重下 8.8 MB。

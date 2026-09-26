@@ -13,6 +13,7 @@
 
   --fetch-figures  下载题目插图到 assets/relax/（已存在则跳过）
   --apply          把转换结果并入 data/*.json，并把合并章名登记进 subjects.json
+  --replace        并库前先删掉上次导入的 rx- 开头的题（可重复导入）
   --dry-run        只做转换与统计，不写任何文件
 """
 
@@ -113,6 +114,14 @@ TOPIC_WORDS = {
              "递归查询", "迭代查询"],
 }
 
+# 源数据里"缺图"导致根本无法作答的题：题干明确说"如下图/如下表"，
+# 但整个源数据里没有对应插图（PDF 抽取时漏了）。作者修好后删掉对应条目重灌即可。
+SRC_DEFECTS = {
+    "p3c2q120": "题干要的\"资源分配表\"源数据里没有（解析里那张是另一个矩阵）",
+    "p4c3q88": "题干要的\"局域网拓扑图\"源数据里没有",
+    "p4c4q66": "题干要的\"网络拓扑图\"源数据里没有",
+}
+
 BLOCK_TAG_RE = re.compile(r"<(p|div|li|tr|table)\b[^>]*>", re.I)
 BLOCK_END_RE = re.compile(r"</(p|div|li|tr|table)>", re.I)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
@@ -184,6 +193,10 @@ def convert(site, want_figures=True):
         for q in ch["questions"]:
             report["total"] += 1
             qid = q["id"]
+
+            if qid in SRC_DEFECTS:
+                report["skipped"].append((qid, "缺图无法作答 —— " + SRC_DEFECTS[qid]))
+                continue
 
             opts = q.get("opts") or {}
             if len(opts) != 4 or sorted(opts.keys()) != ["A", "B", "C", "D"]:

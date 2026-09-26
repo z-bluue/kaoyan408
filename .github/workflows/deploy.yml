@@ -41,7 +41,12 @@ jobs:
       - name: 整理站点文件
         run: |
           mkdir -p _site
-          cp -r index.html manifest.webmanifest sw.js css js data icons _site/
+          # 注意：assets/ 里是全部配图（assets/relax/，约 8.8 MB），
+          # 漏拷会导致线上插图 404 —— 电脑本地跑 http.server 看不出问题，只在手机上线时暴露。
+          cp -r index.html manifest.webmanifest sw.js css js data icons assets _site/
+
+      - name: 校验站点文件完整性
+        run: python3 tools/check_site.py _site
 
       - uses: actions/configure-pages@v5
 

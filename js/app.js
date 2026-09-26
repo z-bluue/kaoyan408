@@ -170,6 +170,9 @@ async function saveSettings(patch = {}) {
 /* ===========================================================
    范围
    =========================================================== */
+// 从开始页点进来的模式：先让用户确认范围，选完立刻开局（免得做一半才发现范围不对）
+let pendingMode = null;
+
 function inScope(q) {
   const sc = S.scope;
   if (sc.subjects.size && !sc.subjects.has(q.subject)) return false;
@@ -1191,6 +1194,42 @@ function renderScopeSheet() {
   $('#scopeLimit').innerHTML = LIMIT_CHOICES.map(n =>
     `<div class="chip ${sc.limit === n ? 'on' : ''}" data-sc-limit="${n}">${n} 题</div>`
   ).join('');
+
+  renderScopeHint();
+}
+
+const MODE_LABEL = {
+  due: '复习', new: '刷新题', wrong: '错题重做', weak: '薄弱点推题', random: '随机练习',
+};
+
+/** 当前范围在该模式下能出几道题 */
+function availableCount(mode) {
+  switch (mode) {
+    case 'due': return dueCount();
+    case 'wrong': return wrongCount();
+    case 'new': return newCount();
+    default: return scopePool().length;
+  }
+}
+
+/** 弹层底部的"这次会拿什么开刷"提示 —— 免得做一半才发现范围没选对 */
+function renderScopeHint() {
+  const el = $('#scopeHint');
+  if (!el) return;
+  const btn = $('#btnScopeApply');
+
+  if (pendingMode) {
+    const n = availableCount(pendingMode);
+    el.className = n ? 'scope-hint' : 'scope-hint warn';
+    el.innerHTML = n
+      ? `即将<b>${MODE_LABEL[pendingMode]}</b>：当前范围里有 <b>${n}</b> 道可选，本轮做 ${S.scope.limit} 道`
+      : `即将<b>${MODE_LABEL[pendingMode]}</b>：当前范围里没有可做的题，换个范围试试`;
+    if (btn) btn.textContent = '用这个范围开始';
+  } else {
+    el.className = 'scope-hint';
+    el.innerHTML = `${esc(scopeText())} · 共 <b>${scopePool().length}</b> 道可选`;
+    if (btn) btn.textContent = '确定';
+  }
 }
 
 /* ===========================================================
@@ -1208,11 +1247,13 @@ function bindGlobalEvents() {
     showView(t.dataset.view);
   });
 
-  // 开始按钮
+  // 开始按钮：先让用户确认范围，免得做一半才发现选错了
   $('#startScreen').addEventListener('click', e => {
     const b = e.target.closest('[data-mode]');
     if (!b) return;
-    startSession(b.dataset.mode);
+    pendingMode = b.dataset.mode;
+    renderScopeSheet();
+    openSheet('#scopeSheet');
   });
 
   // 选项
@@ -1284,9 +1325,16 @@ function bindGlobalEvents() {
   });
 
   // 范围弹层
-  $('#btnScope').addEventListener('click', () => { renderScopeSheet(); openSheet('#scopeSheet'); });
+  $('#btnScope').addEventListener('click', () => {
+    pendingMode = null;              // 只是改范围，不立刻开局
+    renderScopeSheet();
+    openSheet('#scopeSheet');
+  });
   $('#scopeSheet').addEventListener('click', e => {
-    if (e.target.closest('[data-close]')) return closeSheet('#scopeSheet');
+    if (e.target.closest('[data-close]')) {
+      pendingMode = null;
+      return closeSheet('#scopeSheet');
+    }
     const c = e.target.closest('.chip');
     if (!c) return;
     const sc = S.scope;
@@ -1303,6 +1351,13 @@ function bindGlobalEvents() {
     closeSheet('#scopeSheet');
     renderStart();
     $('#viewSub').textContent = scopeText().replace(/^范围：/, '');
+
+    if (pendingMode) {
+      const mode = pendingMode;
+      pendingMode = null;            // 先清掉，避免 startSession 里弹 toast 时状态还挂着
+      startSession(mode);
+      return;
+    }
     toast('范围已更新');
   });
 

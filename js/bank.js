@@ -165,15 +165,27 @@ export function buildBases({ repo, branch = 'main', mirror = 'jsdelivr' } = {}) 
 export async function checkUpdate(settings) {
   const bases = buildBases(settings);
   if (!bases.length) throw new Error('请先填写 GitHub 仓库，格式 owner/repo');
+
+  // 并行问所有源，取版本号最高的那个。两个原因：
+  //  1) 各源缓存过期时间差很远（jsDelivr 的 @main 最多缓存 12 小时，Raw 只有几分钟），
+  //     只认第一个能连上的源，会被慢的那个拖住，报"已是最新"其实没更新；
+  //  2) 并行把最坏耗时从「各源超时之和」压到「最慢那个源的一次超时」。
+  const results = await Promise.allSettled(bases.map(async base => {
+    const manifest = await fetchJSON(`${base}data/bank-manifest.json?t=${Date.now()}`);
+    if (!manifest || !manifest.subjects) throw new Error('清单格式不正确');
+    return { base, manifest };
+  }));
+
+  let best = null;
   let lastErr = null;
-  for (const base of bases) {
-    try {
-      const manifest = await fetchJSON(`${base}data/bank-manifest.json?t=${Date.now()}`);
-      if (!manifest || !manifest.subjects) throw new Error('清单格式不正确');
-      return { base, manifest };
-    } catch (e) { lastErr = e; }
+  for (const r of results) {
+    if (r.status !== 'fulfilled') { lastErr = r.reason; continue; }
+    const newer = !best
+      || cmpVersion(String(r.value.manifest.version || '0'), String(best.manifest.version || '0')) > 0;
+    if (newer) best = r.value;
   }
-  throw new Error('无法连接更新源：' + (lastErr ? lastErr.message : '网络错误'));
+  if (!best) throw new Error('无法连接更新源：' + (lastErr ? lastErr.message : '网络错误'));
+  return best;
 }
 
 /** 应用更新，只下载版本变高的科目 */

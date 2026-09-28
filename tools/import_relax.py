@@ -122,6 +122,71 @@ SRC_DEFECTS = {
     "p4c4q66": "题干要的\"网络拓扑图\"源数据里没有",
 }
 
+# ---------------------------------------------------------------------------
+# 补图：解析里写了"如下图所示"、但源数据 sol_figs 里一张图都没有的题。
+#
+# 源站作者最初的抽图脚本（tools/figures.py）靠 cluster_drawings() 找矢量簇，
+# 这本书里相当一部分插它在 PyMuPDF 眼里既不是聚类矢量、也不是 XObject 图片，
+# 于是整批被漏掉 —— 33 道题的解析因此都悬着一个"如下图所示"却没图。
+#
+# 由 tools/recover_figs.py 从解析册 PDF 里按"锚点行 ~ 下一题号标记"定位并裁出图，
+# 落在 assets/relax/<题号>_sol1.png。表里每一项都逐张目视核对过。
+# 重跑 recover_figs.py 后，把它的输出（_relax/recovered_figs.json）同步到这里。
+# ---------------------------------------------------------------------------
+RECOVERED_FIGS = {
+    "p1c2q24": "p1c2q24_sol1.png",
+    "p1c2q28": "p1c2q28_sol1.png",
+    "p1c3q51": "p1c3q51_sol1.png",
+    "p1c4q30": "p1c4q30_sol1.png",
+    "p1c4q44": "p1c4q44_sol1.png",
+    "p1c5q22": "p1c5q22_sol1.png",
+    "p1c5q30": "p1c5q30_sol1.png",
+    "p1c5q33": "p1c5q33_sol1.png",
+    "p1c5q34": "p1c5q34_sol1.png",
+    "p1c5q38": "p1c5q38_sol1.png",
+    "p1c5q43": "p1c5q43_sol1.png",
+    "p1c5q49": "p1c5q49_sol1.png",
+    "p1c5q5": "p1c5q5_sol1.png",
+    "p1c6q26": "p1c6q26_sol1.png",
+    "p1c6q33": "p1c6q33_sol1.png",
+    "p1c6q41": "p1c6q41_sol1.png",
+    "p1c6q43": "p1c6q43_sol1.png",
+    "p1c7q27": "p1c7q27_sol1.png",
+    "p1c7q34": "p1c7q34_sol1.png",
+    "p1c7q64": "p1c7q64_sol1.png",
+    "p2c2q20": "p2c2q20_sol1.png",
+    "p3c2q38": "p3c2q38_sol1.png",
+    "p3c2q39": "p3c2q39_sol1.png",
+    "p3c2q84": "p3c2q84_sol1.png",
+    "p3c4q66": "p3c4q66_sol1.png",
+    "p3c5q38": "p3c5q38_sol1.png",
+    "p4c4q32": "p4c4q32_sol1.png",
+    "p4c6q47": "p4c6q47_sol1.png",
+}
+
+# 同批排查出来、但解析册 PDF 里确实没有配图的题（原书缺陷，无法补）。
+# 与其让用户一直找那张不存在的图，不如在解析末尾把话说清楚。
+MISSING_FIGS = {
+    "p1c4q46": "解析册第 32 页正文之后无图，第 33 页整页没有任何图形",
+    "p1c4q71": "解析册第 37 页该段之后无图，第 38 页只有正文里零星的小图形碎片",
+    "p1c5q58": "解析册第 48 页正文之后整页空白；题干自带图，解析指向的正是它",
+    "p3c3q15": "解析册第 195 页全页纯文字，\"如表\"指的是正文里直接列出的数值",
+    "p4c6q33": "解析册第 285 页全页纯文字，无图",
+}
+
+# 解析里指向配图的说法（用于决定插图插在哪一行之后）
+FIG_REF_RE = re.compile(r"如图|下图|如下表|下表|见图")
+
+
+def attach_fig(explain, tag):
+    """把插图插到写"如下图所示"的那一行之后；没有这种说法就追加到末尾。"""
+    lines = explain.split("\n")
+    for i, line in enumerate(lines):
+        if FIG_REF_RE.search(line):
+            lines.insert(i + 1, tag)
+            return "\n".join(lines)
+    return explain + "\n\n" + tag
+
 BLOCK_TAG_RE = re.compile(r"<(p|div|li|tr|table)\b[^>]*>", re.I)
 BLOCK_END_RE = re.compile(r"</(p|div|li|tr|table)>", re.I)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
@@ -180,6 +245,8 @@ def convert(site, want_figures=True):
         "figure_questions": 0,
         "soup": [],
         "chapter_counts": collections.OrderedDict(),
+        "recovered": [],
+        "missing_figs": [],
     }
 
     for ch in site["chapters"]:
@@ -214,7 +281,10 @@ def convert(site, want_figures=True):
                 continue
 
             explain = clean_html(q.get("expl_html") or q.get("expl_text"))
-            if len(explain) < 5:
+            fig_extra = RECOVERED_FIGS.get(qid) if want_figures else None
+            # 有几道题的"解析"本身就是一张图（源解析只写了"如图"两个字），
+            # 把图补回来之后它们才成立，所以这里不能按"解析为空"一律剔掉。
+            if len(explain) < 5 and not fig_extra:
                 report["skipped"].append((qid, "解析为空"))
                 continue
 
@@ -269,6 +339,17 @@ def convert(site, want_figures=True):
                 stem = stem + "\n\n" + "\n".join(added["stem"])
             if added["sol"]:
                 explain = explain + "\n\n" + "\n".join(added["sol"])
+
+            # 源数据漏掉的解析配图：由 recover_figs.py 从解析册 PDF 裁出来的
+            if fig_extra:
+                explain = attach_fig(explain, f'<img src="assets/relax/{fig_extra}">')
+                report["recovered"].append(qid)
+            elif qid in MISSING_FIGS:
+                explain = explain + (
+                    "\n\n（注：原书此处有插图，电子版源数据缺失："
+                    + MISSING_FIGS[qid] + "）"
+                )
+                report["missing_figs"].append(qid)
 
             topics = [chapter] + pick_topics(cid, stem)
 
@@ -358,6 +439,8 @@ def main():
     for sid in ["ds", "co", "os", "net"]:
         print(f"       {sid}: {len(by_subject.get(sid, []))} 题")
     print(f"[插图] 涉及 {report['figure_questions']} 题、{len(report['figures'])} 个图片文件")
+    print(f"[补图] 从解析册 PDF 补回 {len(report['recovered'])} 张解析插图；"
+          f"{len(report['missing_figs'])} 题原书确实无图（已加说明）")
     print(f"[公式残渣] 题干末尾疑似 PDF 杂字符串的题：{len(report['soup'])} 道"
           f"（只统计，不自动清理）")
     for qid, tail in report["soup"][:8]:

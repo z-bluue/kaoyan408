@@ -187,6 +187,12 @@ def attach_fig(explain, tag):
             return "\n".join(lines)
     return explain + "\n\n" + tag
 
+# 源数据里"答案标错"的题：题干与解析都指向另一个选项，人工核对后在这里纠正。
+# 格式：题号 -> (正确选项, 原因)。作者修订源数据后删掉对应条目即可。
+ANSWER_FIXES = {
+    "p4c3q60": ("D", "题干问的是“错误的是”，而解析末尾已说明 NAV 为 0 时仍需等 DIFS + 随机退避，故选 D；原答案 B 本身是正确的说法"),
+}
+
 BLOCK_TAG_RE = re.compile(r"<(p|div|li|tr|table)\b[^>]*>", re.I)
 BLOCK_END_RE = re.compile(r"</(p|div|li|tr|table)>", re.I)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
@@ -247,6 +253,7 @@ def convert(site, want_figures=True):
         "chapter_counts": collections.OrderedDict(),
         "recovered": [],
         "missing_figs": [],
+        "answer_fixed": [],
     }
 
     for ch in site["chapters"]:
@@ -274,6 +281,13 @@ def convert(site, want_figures=True):
             if ans not in opts:
                 report["skipped"].append((qid, f"答案异常({ans or '空'})"))
                 continue
+
+            # 已知的源数据答案错误，导入时就改对
+            if qid in ANSWER_FIXES:
+                better, why = ANSWER_FIXES[qid]
+                if better in opts and better != ans:
+                    report["answer_fixed"].append(f"{qid}: {ans} -> {better}（{why}）")
+                    ans = better
 
             stem = clean_html(q.get("stem_html") or q.get("stem_text"))
             if len(stem) < 5:
@@ -439,6 +453,10 @@ def main():
     for sid in ["ds", "co", "os", "net"]:
         print(f"       {sid}: {len(by_subject.get(sid, []))} 题")
     print(f"[插图] 涉及 {report['figure_questions']} 题、{len(report['figures'])} 个图片文件")
+    if report["answer_fixed"]:
+        print(f"[答案勘误] 已改对 {len(report['answer_fixed'])} 道：")
+        for line in report["answer_fixed"]:
+            print(f"       {line}")
     print(f"[补图] 从解析册 PDF 补回 {len(report['recovered'])} 张解析插图；"
           f"{len(report['missing_figs'])} 题原书确实无图（已加说明）")
     print(f"[公式残渣] 题干末尾疑似 PDF 杂字符串的题：{len(report['soup'])} 道"

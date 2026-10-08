@@ -137,8 +137,26 @@ export async function loadBank(subjectsMeta, { force = false } = {}) {
 /** 丢弃缓存，重新从 ./data 抓取 */
 export async function reloadLocal(subjectsMeta) {
   await store.clear('bank');
-  await store.metaSet(BANK_MANIFEST_KEY, null);
-  return loadBank(subjectsMeta, { force: true });
+  const r = await loadBank(subjectsMeta, { force: true });
+  // 关键：把本地清单记下来。
+  // 如果这里留空，下次「检查更新」会以为本地啥都没有，
+  // 于是把远程（可能比随包发布的本地题库还旧）整批拉回来覆盖掉。
+  await seedManifestBaseline();
+  return r;
+}
+
+/** 清单基线：本地没有记录时，用随包发布的 ./data/bank-manifest.json 当"本地版本" */
+export async function seedManifestBaseline() {
+  const cur = await store.metaGet(BANK_MANIFEST_KEY, null);
+  if (cur && cur.subjects) return cur;
+  try {
+    const local = await fetchJSON(LOCAL_DATA + 'bank-manifest.json');
+    if (local && local.subjects) {
+      await store.metaSet(BANK_MANIFEST_KEY, local);
+      return local;
+    }
+  } catch (_) { /* 拿不到就算了，下次检查更新时再说 */ }
+  return null;
 }
 
 /* ---------------- 远程更新 ---------------- */
@@ -216,6 +234,6 @@ export async function applyUpdate(base, manifest, { onProgress } = {}) {
 }
 
 export default {
-  fetchJSON, cmpVersion, loadSubjectsMeta, loadBank, reloadLocal,
+  fetchJSON, cmpVersion, loadSubjectsMeta, loadBank, reloadLocal, seedManifestBaseline,
   buildBases, checkUpdate, applyUpdate, buildSubject, normalizeQuestion, BANK_MANIFEST_KEY,
 };

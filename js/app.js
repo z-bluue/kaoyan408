@@ -58,7 +58,9 @@ const S = {
   wrongFilter: { subjects: new Set(), onlyUnmastered: true },
   bankWarnings: [],
   aiCount: 0,
-  aiFixes: [],
+  aiFixes: [],      // 纠正历史（当作反面例子喂给 AI 出题）
+  fixes: {},        // 人工修正补丁：qid -> { answer, from, note, tag, at, origExplain }
+  hidden: [],       // 被人工移除的题号（远程题库更新后也不让它回来）
 };
 
 /* ===========================================================
@@ -92,10 +94,26 @@ async function boot() {
 
 async function loadBankAndProgress() {
   S.subjectsMeta = await bank.loadSubjectsMeta();
-  applyBankResult(await bank.loadBank(S.subjectsMeta));
+  // 先把"本地版本"基线定下来（随包发布的清单），否则首次启动或重载后
+  // 会因为"本地没版本"而把远程旧题库整批拉回来
+  await bank.seedManifestBaseline();
+  S.fixes = (await store.metaGet('fixes', {})) || {};
+  S.hidden = (await store.metaGet('hidden', [])) || [];
+  await reloadBankState();
   S.progress = new Map((await store.getAll('progress')).map(p => [p.id, p]));
-  await loadAiQuestions();
   S.aiFixes = await store.metaGet('aiFixes', []);
+}
+
+/**
+ * 重新组装题题库：题库 -> AI 题 -> 套用人工修正/移除。
+ * 只要重新加载了题库（启动、远程更新、手动重载）就必须走这里，
+ * 否则辛苦改对的答案会被题库更新冲掉。
+ */
+async function reloadBankState() {
+  applyBankResult(await bank.loadBank(S.subjectsMeta));
+  await loadAiQuestions();
+  applyHidden();
+  applyFixes();
 }
 
 /** 把之前用 AI 生成过的题目也接入题库（它们沿用原题的科目/章节） */
@@ -121,6 +139,7 @@ async function reloadAiQuestions() {
   S.questions = S.questions.filter(q => !q.ai);
   for (const [id, q] of [...S.byId]) if (q.ai) S.byId.delete(id);
   await loadAiQuestions();
+  applyFixes();
   // 会话队列里已经不存在的题要剔掉，否则会卡住
   if (S.session) S.session.queue = S.session.queue.filter(id => S.byId.has(id));
 }
@@ -131,6 +150,41 @@ function applyBankResult(r) {
   S.byId = r.byId;
   S.bankWarnings = r.warnings;
   S.subjects = r.subjects || [];
+}
+
+/* ---------------- 人工修正层 ---------------- */
+
+/** 按补丁拼出最终解析（幂等：重复套用不会把"⚠️"越套越多） */
+function fixExplain(f, q) {
+  const to = (f.answer || []).join('');
+  return `⚠️ 本题原答案 ${f.from} 有误，已改为 ${to}${f.tag ? `（${f.tag}）` : ''}。`
+    + (f.note ? `\n纠正说明：${f.note}` : '')
+    + `\n\n—— 以下是原来的解析，仅供参考 ——\n${f.origExplain || q.explain || ''}`;
+}
+
+/** 把人工改过的答案套回题库（题库本身不动，修正单独存一份叠加） */
+function applyFixes() {
+  for (const [qid, f] of Object.entries(S.fixes || {})) {
+    const q = S.byId.get(qid);
+    if (!q || !f || !Array.isArray(f.answer) || !f.answer.length) continue;
+    // 题库（多半是上游改了）自己已经改成这个答案了，补丁就让位，
+    // 免得解析里一直挂着一句过时的"原答案 X 有误"
+    if ((q.answer || []).join('') === f.answer.join('')) continue;
+    q.aiOriginalAnswer = f.from;
+    q.answer = [...f.answer];
+    q.aiFixNote = [f.tag, f.note].filter(Boolean).join('，');
+    q.aiFixedBy = f.tag || 'manual';
+    q.aiFixedAt = f.at;
+    q.explain = fixExplain(f, q);
+  }
+}
+
+/** 把被人工移除的题从题库里拿掉 */
+function applyHidden() {
+  const hide = new Set(S.hidden || []);
+  if (!hide.size) return;
+  S.questions = S.questions.filter(q => !hide.has(q.id));
+  for (const id of hide) S.byId.delete(id);
 }
 
 async function refreshProgress() {
@@ -540,13 +594,13 @@ function renderSrsRow() {
     b.textContent = 'AI 出同类题';
     foot.appendChild(b);
   }
-  // AI 生成的题允许上报答案错误（已经人工纠正过就不再重复报）
-  if (q.ai && !q.aiFixedAt) {
+  // 任何题都可以上报答案有误（导入题、自研题、AI 题都一样）
+  {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn';
     b.id = 'btnAiFix';
-    b.textContent = '答案有误';
+    b.textContent = q.aiFixedAt ? '答案已纠正' : '答案有误';
     foot.appendChild(b);
   }
   $('#btnNext').addEventListener('click', () => commitGrade(auto));
@@ -845,28 +899,29 @@ function openFixPanel() {
   fixPicked = null;
   recheckPending = null;
   const letters = (q.options || []).map(o => o.key);
+  const cur = (q.answer || []).join('');
   const canAskAi = !!(S.settings.aiKey && S.settings.aiEnabled);
   $('#quizFoot').innerHTML = `
     <div class="fix-panel">
       <div class="fix-row">
-        这道题 AI 给的答案是 <b>${esc((q.answer || []).join(''))}</b>。
-        你知道正确答案就点下面，拿不准就让 AI 重算一遍：
+        题库给的答案是 <b>${esc(cur)}</b>${q.aiFixedAt ? `（已人工纠正过，原答案是 ${esc(q.aiOriginalAnswer || '?')}）` : ''}。
+        你自己知道正确答案就直接点下面；拿不准就让 AI 独立做一遍，再由你定。
       </div>
       <div class="chips" id="fixLetters">
-        ${letters.map(k => `<div class="chip" data-fix="${esc(k)}">${esc(k)}</div>`).join('')}
+        ${letters.map(k => `<div class="chip ${k === cur ? 'on' : ''}" data-fix="${esc(k)}">${esc(k)}</div>`).join('')}
       </div>
       <input class="input" id="fixNote" type="text" autocomplete="off"
              placeholder="补充说明（可选）：比如错在哪、为什么" style="margin-top:8px">
       <div class="fix-result" id="fixResult" hidden></div>
       <div class="btn-row" style="margin-top:10px">
         <button class="btn" id="fixCancel" type="button">取消</button>
-        <button class="btn" id="fixRecheck" type="button"${canAskAi ? '' : ' disabled'}>AI 重算</button>
-        <button class="btn danger" id="fixDelete" type="button">删掉这题</button>
+        <button class="btn primary" id="fixRecheck" type="button"${canAskAi ? '' : ' disabled'}>让 AI 判断</button>
       </div>
       <div class="btn-row" style="margin-top:8px">
-        <button class="btn primary" id="fixSubmit" type="button">按上面选的答案纠正</button>
+        <button class="btn" id="fixSubmit" type="button">按上面选的答案纠正</button>
+        <button class="btn danger" id="fixDelete" type="button">移除这题</button>
       </div>
-      ${canAskAi ? '' : '<div class="muted small">未配置 API Key，「AI 重算」不可用</div>'}
+      ${canAskAi ? '' : '<div class="muted small">未配置 API Key，「让 AI 判断」不可用；你仍可以自己选答案纠正</div>'}
     </div>`;
 }
 
@@ -902,22 +957,33 @@ async function recheckCurrent(btn) {
     const conf = { high: '较有把握', medium: '一般', low: '不太确定' }[r.confidence] || '一般';
     const body = `<div class="fix-reason">${richText(r.reason)}</div>`;
 
-    if (r.answer === current) {
+    if (r.verdict === 'broken') {
+      // AI 认为题本身有毛病（缺图/选项不全/多个正确项）—— 那就别逼用户选答案了
+      recheckPending = null;
+      box.className = 'fix-result err';
+      box.innerHTML =
+        '<div class="fix-head">AI 认为<b>这道题本身有问题</b>，给不出答案</div>'
+        + body
+        + '<div class="muted small">常见原因：题干依赖的图/表缺失、选项不全、有多个正确选项。这种题建议直接移除。</div>'
+        + '<div class="btn-row" style="margin-top:8px">'
+        + '<button class="btn danger" id="fixDelete2" type="button">移除这题</button>'
+        + '</div>';
+    } else if (r.answer === current) {
       recheckPending = null;
       box.className = 'fix-result same';
       box.innerHTML =
-        `<div class="fix-head">AI 独立重算后，答案仍然是 <b>${esc(r.answer)}</b>（${conf}）</div>`
+        `<div class="fix-head">AI 独立做一遍，选的是 <b>${esc(r.answer)}</b>，和题库一致（${conf}）</div>`
         + body
-        + '<div class="muted small">它算得和你一样，那这道题多半没错 —— 是你自己看错了，回头对着解析再想一遍。</div>';
+        + '<div class="muted small">它和你库里的答案一样，那这道题多半没错 —— 回头对着解析再想一遍。</div>';
     } else {
       recheckPending = r.answer;
       box.className = 'fix-result differ';
       box.innerHTML =
-        `<div class="fix-head">AI 重算得出 <b>${esc(r.answer)}</b>，但题库里写的是 <b>${esc(current)}</b>（${conf}）</div>`
+        `<div class="fix-head">AI 算出答案是 <b>${esc(r.answer)}</b>，题库里写的却是 <b>${esc(current)}</b>（${conf}）</div>`
         + body
-        + '<div class="muted small">核对一下它的推导，如果没问题就采纳（改动会记下来，以后的 AI 题不会重复这个错）。</div>'
+        + '<div class="muted small">核对一下它的推导。没问题就采纳 —— 修改只会存在你这里，题库更新也不会冲掉。</div>'
         + `<div class="btn-row" style="margin-top:8px">
-             <button class="btn primary" id="fixAdopt" type="button">采纳 ${esc(r.answer)}</button>
+             <button class="btn primary" id="fixAdopt" type="button">采纳，改成 ${esc(r.answer)}</button>
            </div>`;
     }
   } catch (e) {
@@ -943,7 +1009,7 @@ function fixNote() {
   return String(($('#fixNote') || {}).value || '').trim();
 }
 
-/** 真正落地一次纠正：改题、存库、记历史、刷新界面 */
+/** 真正落地一次纠正：写补丁层、记历史、刷新界面 */
 async function applyFixAnswer(picked, note, tag) {
   const st = S.quiz;
   if (!st || !st.q) return;
@@ -951,26 +1017,37 @@ async function applyFixAnswer(picked, note, tag) {
   const from = (q.answer || []).join('');
   if (picked === from) { toast('和原答案一样，不用纠正'); return; }
 
-  const why = [tag, note].filter(Boolean).join('，');
-  const fixed = {
-    ...q,
+  // 原解析只留最早那份，重复纠正不会出现"⚠️…⚠️…"套娃
+  const prev = S.fixes[q.id];
+  const origExplain = (prev && prev.origExplain) || q.explain || '';
+
+  S.fixes = { ...(S.fixes || {}) };
+  S.fixes[q.id] = {
     answer: [picked],
-    aiOriginalAnswer: from,
-    aiFixNote: why,
-    aiFixedAt: Date.now(),
-    aiFixedBy: tag || 'manual',
-    explain: `⚠️ 本题原答案 ${from} 有误，已改为 ${picked}${tag ? `（${tag}）` : ''}。`
-      + (note ? `\n纠正说明：${note}` : '')
-      + `\n\n—— 以下是模型原来的解析，仅供参考 ——\n${q.explain || ''}`,
+    from,
+    note,
+    tag: tag || '',
+    at: Date.now(),
+    origExplain,
   };
+  await store.metaSet('fixes', S.fixes);
+  applyFixes();                     // 就地套用，界面立刻是纠正后的答案
 
-  await store.aiPut(fixed);
-  S.byId.set(fixed.id, fixed);
-  const idx = S.questions.findIndex(x => x.id === fixed.id);
-  if (idx >= 0) S.questions[idx] = fixed;
+  // AI 生成的题同时把整题写回自己的题库，保持那份数据自洽
+  if (q.ai) {
+    const merged = S.byId.get(q.id) || q;
+    await store.aiPut({
+      ...merged,
+      aiOriginalAnswer: from,
+      aiFixNote: merged.aiFixNote,
+      aiFixedAt: merged.aiFixedAt,
+      aiFixedBy: merged.aiFixedBy,
+    });
+  }
 
+  const why = [tag, note].filter(Boolean).join('，');
   const list = [{
-    qid: fixed.id,
+    qid: q.id,
     stem: plainText(q.stem, 42),
     from,
     to: picked,
@@ -982,23 +1059,38 @@ async function applyFixAnswer(picked, note, tag) {
 
   // 用户当时选的其实就是正确答案，说明他本来就对，把对错判定一起纠回来
   const wasRight = st.picked && st.picked.size === 1 && [...st.picked][0] === picked;
-  st.q = fixed;
+  st.q = S.byId.get(q.id) || q;
   if (wasRight) st.correct = true;
   showFeedback();
 
   renderStart(); renderWrong(); renderMe();
   autoSyncSoon();
-  toast(`已纠正为 ${picked}，之后的 AI 出题会参考它`, 3200);
+  toast(`已改为 ${picked}，之后复习、AI 出题都按新答案走`, 3200);
 }
 
-/** 直接删掉这道 AI 题（答案错得没法救时用） */
-async function deleteAiQuestion() {
+/** 移除一道题：AI 题从自己的题库删；题库题记进隐藏名单（远程更新后也不会回来） */
+async function deleteQuestion() {
   const st = S.quiz;
   const q = st && st.q;
   if (!q) return;
-  if (!confirm('从题库里彻底删掉这道题？答题记录也会一起清掉。')) return;
+  const tip = q.ai
+    ? '把这道 AI 题从题库里彻底删掉？答题记录也会一起清掉。'
+    : '把这道题从你的题库里移除？\n（远程题库里还有它，但以后加载时会被忽略；答题记录一起清掉）';
+  if (!confirm(tip)) return;
 
-  await store.aiDelete(q.id);
+  if (q.ai) {
+    await store.aiDelete(q.id);
+  } else {
+    S.hidden = [...new Set([...(S.hidden || []), q.id])];
+    await store.metaSet('hidden', S.hidden);
+  }
+  // 它的纠正记录也没意义了
+  if (S.fixes && S.fixes[q.id]) {
+    const next = { ...S.fixes };
+    delete next[q.id];
+    S.fixes = next;
+    await store.metaSet('fixes', S.fixes);
+  }
   try { await store.del('progress', q.id); } catch (_) { /* 可能本来就没有记录 */ }
   try { await store.deleteLogsByQid(q.id); } catch (_) { /* 同上 */ }
 
@@ -1012,7 +1104,7 @@ async function deleteAiQuestion() {
 
   renderStart(); renderWrong(); renderStats(); renderMe();
   autoSyncSoon();
-  toast('已删除这道题');
+  toast('已从题库移除');
   if (S.session) renderQuiz();
 }
 
@@ -1159,8 +1251,7 @@ async function checkBankUpdate({ silent = false } = {}) {
       say('已是最新题库');
     } else {
       say(`更新完成：${res.changed.length} 个科目，新增 ${res.added} 题`);
-      const r = await bank.loadBank(S.subjectsMeta);
-      applyBankResult(r);
+      await reloadBankState();          // 走统一入口，人工修正/移除会重新叠加上去
       renderStart(); renderWrong(); renderStats(); renderMe();
     }
     await saveSettings({ lastUpdate: Date.now(), bankVersion: manifest.version || '' });
@@ -1350,7 +1441,10 @@ function bindGlobalEvents() {
     if (e.target.closest('#fixRecheck')) { await recheckCurrent(e.target.closest('#fixRecheck')); return; }
     if (e.target.closest('#fixAdopt')) { await adoptRecheck(); return; }
     if (e.target.closest('#fixSubmit')) { await submitFix(); return; }
-    if (e.target.closest('#fixDelete')) { await deleteAiQuestion(); return; }
+    if (e.target.closest('#fixDelete') || e.target.closest('#fixDelete2')) {
+      await deleteQuestion();
+      return;
+    }
     const fixChip = e.target.closest('#fixLetters .chip');
     if (fixChip) {
       fixPicked = fixChip.dataset.fix;
@@ -1572,7 +1666,7 @@ function bindGlobalEvents() {
     const st = await autoAi.loadState();
     st.topics = {};
     await autoAi.saveState(st);
-    // 纠正历史也一起清掉
+    // 纠正历史也一起清掉（但不动题库题的人工修正，那是另一回事）
     S.aiFixes = [];
     await store.metaSet('aiFixes', []);
 
@@ -1591,7 +1685,12 @@ function bindGlobalEvents() {
     try {
       const r = await bank.reloadLocal(S.subjectsMeta);
       applyBankResult(r);
-      $('#bankMsg').textContent = `已重载 ${S.questions.length} 题`;
+      await loadAiQuestions();
+      applyHidden();
+      applyFixes();
+      const fixed = Object.keys(S.fixes || {}).length;
+      $('#bankMsg').textContent = `已重载 ${S.questions.length} 题`
+        + (fixed ? `（含 ${fixed} 道人工纠正）` : '');
       renderStart(); renderWrong(); renderStats(); renderMe();
     } catch (e) {
       $('#bankMsg').textContent = '重载失败：' + e.message;

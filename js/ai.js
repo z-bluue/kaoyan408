@@ -283,14 +283,19 @@ const RECHECK_PROMPT = `你是一位严谨的考研计算机学科专业基础�
 - 计算类题目（进制、浮点、存储器容量、CPU 时间、流水线加速比、页面置换等）必须一步一步算出结果，把关键中间值写清楚，最后再对选项；
 - 概念类题目要说明判断依据（出自哪条定义、协议层次、定理）。
 - 算完后自己再检查一遍：有没有算错、有没有看漏题干条件、有没有把单位搞混。
+- 特别注意题干问的是"正确的是"还是"错误的是"，选反了就是错。
+
+然后判断这道题本身有没有毛病：如果题干依赖的图/表/数据没有给全、选项残缺、有多个正确项或没有正确项，就判 broken。
 
 严格输出 json（不要 markdown 代码块，不要任何额外文字），结构如下：
 {
   "answer": "B",
   "reason": "你的完整推导过程",
-  "confidence": "high"
+  "confidence": "high",
+  "verdict": "wrong"
 }
-answer 只能是一个选项字母；confidence 取 high / medium / low。`;
+verdict 取 ok（原答案正确）/ wrong（原答案错误，正确项是 answer）/ broken（题目本身有问题，给不出答案，answer 填空字符串）；
+answer 只能是单个选项字母； confidence 取 high / medium / low。`;
 
 /** 校验复核结果；不能确认合法就不放行 */
 function validateRecheck(raw, question) {
@@ -298,16 +303,29 @@ function validateRecheck(raw, question) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { ok: false, errs: ['返回内容不是 JSON 对象'] };
   }
+  const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
+  if (reason.length < 5) errs.push('没有给出推导过程');
+  const confidence = ['high', 'medium', 'low'].includes(raw.confidence) ? raw.confidence : 'medium';
+  const verdict = ['ok', 'wrong', 'broken'].includes(raw.verdict) ? raw.verdict : '';
+
+  // 判定"题目本身有问题"时不需要给选项
+  if (verdict === 'broken') {
+    return { ok: errs.length === 0, errs, value: { answer: '', reason, confidence, verdict } };
+  }
+
   const answer = String(raw.answer ?? '').trim().toUpperCase().slice(0, 1);
   if (!/^[A-D]$/.test(answer)) errs.push('没有给出有效的选项字母');
   else if (Array.isArray(question.options) && question.options.length
     && !question.options.some(o => o.key === answer)) {
     errs.push(`重算结果 ${answer} 不在选项中`);
   }
-  const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
-  if (reason.length < 5) errs.push('没有给出推导过程');
-  const confidence = ['high', 'medium', 'low'].includes(raw.confidence) ? raw.confidence : 'medium';
-  return { ok: errs.length === 0, errs, value: { answer, reason, confidence } };
+  // 模型没给 verdict 时，按它与原答案是否一致兜底推断
+  const from = (question.answer || []).join('');
+  return {
+    ok: errs.length === 0,
+    errs,
+    value: { answer, reason, confidence, verdict: verdict || (answer === from ? 'ok' : 'wrong') },
+  };
 }
 
 /**

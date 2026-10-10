@@ -123,6 +123,16 @@ export async function repairTodayCount(actual) {
   return s;
 }
 
+/** 连续打卡：从今天（今天还没做就从昨天）往回数，逐日都要有作答 */
+function streakFromDays(days) {
+  if (!days.size) return 0;
+  let t = Date.now();
+  if (!days.has(dayKey(t))) t -= DAY;
+  let n = 0;
+  while (days.has(dayKey(t))) { n++; t -= DAY; }
+  return n;
+}
+
 /**
  * 累计值的兜底修理。
  * 正常情况下「流水条数 ≤ 累计作答次数」（删题会连流水一起删，只会更小），
@@ -132,13 +142,18 @@ export async function repairTodayCount(actual) {
 export async function repairLifetimeFromLogs() {
   const s = await lifetime();
   const n = await store.count('logs');
-  if (n <= (s.total || 0)) return s;
+  if (n <= (s.total || 0)) return s;      // 计数器不落后，不用扫全表
   const rows = await store.getAll('logs');
   const correct = rows.reduce((a, l) => a + (l.correct ? 1 : 0), 0);
+  // 连续打卡、最近作答日也是同一次 pull 被盖掉的，既然流水已经在手，顺手重算
+  const days = new Set(rows.map(l => dayKey(l.ts)));
+  const latest = [...days].sort().pop() || '';
   const out = {
     ...s,
     total: Math.max(s.total || 0, rows.length),
     totalCorrect: Math.max(s.totalCorrect || 0, correct),
+    streak: Math.max(s.streak || 0, streakFromDays(days)),
+    lastDate: latest > (s.lastDate || '') ? latest : (s.lastDate || ''),
   };
   await store.metaSet('stats', out);
   return out;

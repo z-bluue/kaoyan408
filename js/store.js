@@ -190,6 +190,78 @@ async function readAllMeta() {
   return out;
 }
 
+/* ---------------- meta 合并策略 ----------------
+   同步的 pull 不能盲覆盖：云端那份可能比本地旧（上次推送时的快照）。
+   以前直接把远端的 stats / fixes / hidden 盖回本地，于是
+   “刷新一下，今日刷题变 0”、“手动改对的答案又变回错的”。
+   对策：计数器只增不减，人工改动按时间取新，黑名单取并集。 */
+function mergeMetaValue(key, remote, local) {
+  if (local === undefined || local === null) return remote;
+  switch (key) {
+    case 'stats': return mergeStats(remote, local);
+    case 'fixes': return mergeFixes(remote, local);
+    case 'hidden': return [...new Set([...(local || []), ...(remote || [])])];
+    case 'aiFixes': return mergeFixHistory(remote, local);
+    default: return remote;
+  }
+}
+
+function mergeStats(remote = {}, local = {}) {
+  const out = { ...local };
+  const max = (a, b) => Math.max(a || 0, b || 0);
+  out.total = max(local.total, remote.total);
+  out.totalCorrect = max(local.totalCorrect, remote.totalCorrect);
+  out.streak = max(local.streak, remote.streak);
+  out.lastDate = [local.lastDate || '', remote.lastDate || ''].sort().pop();
+
+  // 今日计数：同一天取较大值；不同天则保留较新的那天（别被昨天的快照打回 0）
+  const lt = local.todayDate || '';
+  const rt = remote.todayDate || '';
+  if (lt > rt) {
+    out.todayDate = lt;
+    out.todayCount = local.todayCount || 0;
+    out.todayCorrect = local.todayCorrect || 0;
+  } else if (rt > lt) {
+    out.todayDate = rt;
+    out.todayCount = remote.todayCount || 0;
+    out.todayCorrect = remote.todayCorrect || 0;
+  } else {
+    out.todayCount = max(local.todayCount, remote.todayCount);
+    out.todayCorrect = max(local.todayCorrect, remote.todayCorrect);
+  }
+
+  // 每日汇总：同一天取较大值（不能相加，两台设备会重复计）
+  const days = { ...(remote.days || {}) };
+  for (const [d, v] of Object.entries(local.days || {})) {
+    const r = days[d];
+    days[d] = r
+      ? { total: max(r.total, v.total), correct: max(r.correct, v.correct) }
+      : v;
+  }
+  if (Object.keys(days).length) out.days = days;
+  return out;
+}
+
+/** 人工改过的答案：同一题取改动时间较新的那份 */
+function mergeFixes(remote = {}, local = {}) {
+  const out = { ...(remote || {}) };
+  for (const [qid, f] of Object.entries(local || {})) {
+    const r = out[qid];
+    if (!r || (f && f.at || 0) >= (r.at || 0)) out[qid] = f;
+  }
+  return out;
+}
+
+/** 纠正历史（喂给 AI 的反面例子）：按 题号+时间 去重，保留最新 20 条 */
+function mergeFixHistory(remote, local) {
+  const byKey = new Map();
+  for (const f of [...(remote || []), ...(local || [])]) {
+    if (!f || !f.qid) continue;
+    byKey.set(`${f.qid}|${f.at || 0}`, f);
+  }
+  return [...byKey.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 20);
+}
+
 export async function importAll(payload, { merge = true } = {}) {
   const stats = { progress: 0, logs: 0, meta: 0, ai: 0 };
   if (!payload) return stats;
@@ -226,7 +298,8 @@ export async function importAll(payload, { merge = true } = {}) {
   if (payload.meta && merge) {
     for (const [k, v] of Object.entries(payload.meta)) {
       if (LOCAL_ONLY_META.has(k)) continue;
-      await metaSet(k, v); stats.meta++;
+      const cur = await metaGet(k, undefined);
+      await metaSet(k, mergeMetaValue(k, v, cur)); stats.meta++;
     }
   }
 

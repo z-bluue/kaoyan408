@@ -98,6 +98,31 @@ export async function bumpLifetime({ correct, ts = Date.now() }) {
   return s;
 }
 
+/**
+ * 今天做了多少题 —— 直接数流水。
+ * 流水是按 qid|ts 去重合并的，不会像计数器那样被旧快照盖掉，
+ * 所以拿它当“今日刷题”的交叉校验来源。
+ */
+export async function todayFromLogs() {
+  const rows = await store.logsSince(startOfDay());
+  return rows.length;
+}
+
+/** 若计数器落后于流水（被旧数据覆盖过），用它补回来；只增不减 */
+export async function repairTodayCount(actual) {
+  const s = await lifetime();
+  const today = dayKey();
+  let dirty = false;
+  if (s.todayDate !== today) {
+    if (actual > 0) { s.todayDate = today; s.todayCount = actual; s.todayCorrect = s.todayCorrect || 0; dirty = true; }
+  } else if ((s.todayCount || 0) < actual) {
+    s.todayCount = actual;
+    dirty = true;
+  }
+  if (dirty) await store.metaSet('stats', s);
+  return s;
+}
+
 /* ---------------- 图表 ---------------- */
 function setupCanvas(cv) {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);

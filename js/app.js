@@ -769,7 +769,11 @@ function renderWrong() {
 async function renderStats() {
   const ov = stats.progressOverview(S.questions, S.progress);
   const life = await stats.lifetime();
-  const today = life.todayDate === dayKey() ? life.todayCount : 0;
+  // 计数器 + 流水交叉校验：万一计数器被云端的旧快照盖过，这里按流水把它补回来
+  const logged = await stats.todayFromLogs();
+  const counted = life.todayDate === dayKey() ? (life.todayCount || 0) : 0;
+  const today = Math.max(counted, logged);
+  if (logged > counted) stats.repairTodayCount(logged).catch(() => {});
 
   $('#stToday').textContent = `${today}/${S.settings.goal || 40}`;
   $('#stAcc').textContent = pct(life.totalCorrect || 0, life.total || 0);

@@ -213,6 +213,8 @@ function kickOffBackgroundTasks() {
     t.push(autoSync());
   }
   t.push(store.trimLogs(30000).catch(() => {}));
+  // 累计值/今日计数被云端旧快照盖过的话，用流水兜底修回来
+  t.push(stats.repairLifetimeFromLogs().catch(() => {}));
   Promise.allSettled(t).then(() => { renderStart(); renderMe(); });
 }
 

@@ -123,6 +123,27 @@ export async function repairTodayCount(actual) {
   return s;
 }
 
+/**
+ * 累计值的兜底修理。
+ * 正常情况下「流水条数 ≤ 累计作答次数」（删题会连流水一起删，只会更小），
+ * 所以一旦流水条数比计数器还多，就说明计数器被云端旧快照盖过 → 按流水抬回来。
+ * 只增不减：流水被 trim 到 3 万条后，也不会把计数器压低。
+ */
+export async function repairLifetimeFromLogs() {
+  const s = await lifetime();
+  const n = await store.count('logs');
+  if (n <= (s.total || 0)) return s;
+  const rows = await store.getAll('logs');
+  const correct = rows.reduce((a, l) => a + (l.correct ? 1 : 0), 0);
+  const out = {
+    ...s,
+    total: Math.max(s.total || 0, rows.length),
+    totalCorrect: Math.max(s.totalCorrect || 0, correct),
+  };
+  await store.metaSet('stats', out);
+  return out;
+}
+
 /* ---------------- 图表 ---------------- */
 function setupCanvas(cv) {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
